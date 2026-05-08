@@ -14,6 +14,7 @@ _SEED_AGENTS = [
         description="通过 Arxiv / Web 搜索工具检索论文，汇总后生成研究报告。",
         agent_type=AgentType.TOOL_USE,
         system_prompt="You are a research assistant. Search for papers and summarize findings.",
+        tool_names=["web_search", "arxiv_search"],
     ),
     AgentTemplate(
         id="agent-claude-code-001",

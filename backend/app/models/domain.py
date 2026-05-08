@@ -31,6 +31,10 @@ class AgentTemplate(BaseModel):
     description: str
     agent_type: AgentType
     system_prompt: str
+    # tool_use agent config
+    tool_names: list[str] = Field(default_factory=list)
+    openai_model: str = "gpt-4o"
+    openai_base_url: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

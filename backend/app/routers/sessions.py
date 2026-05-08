@@ -6,6 +6,7 @@ from app.db.deps import get_db
 from app.models.domain import Session, SessionStatus, MessageRole, AgentType
 from app.adapters.registry import AdapterRegistry, get_registry
 from app.adapters.claude_code import ClaudeCodeAdapter
+from app.adapters.openai_tool_use import OpenAIToolUseAdapter
 from app.adapters.base import StreamEventType
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -34,6 +35,18 @@ async def create_session(
         try:
             await adapter.start(agent.system_prompt)
         except RuntimeError as e:
+            await db.update_session_status(session.id, SessionStatus.ERROR)
+            raise HTTPException(status_code=500, detail=str(e))
+        registry.register(session.id, adapter)
+    elif agent.agent_type == AgentType.TOOL_USE:
+        adapter = OpenAIToolUseAdapter(
+            tool_names=agent.tool_names,
+            model=agent.openai_model,
+            base_url=agent.openai_base_url,
+        )
+        try:
+            await adapter.start(agent.system_prompt)
+        except (ValueError, RuntimeError) as e:
             await db.update_session_status(session.id, SessionStatus.ERROR)
             raise HTTPException(status_code=500, detail=str(e))
         registry.register(session.id, adapter)
@@ -97,7 +110,6 @@ async def session_stream(
     try:
         adapter = registry.get(session_id)
     except KeyError:
-        # Session exists but has no adapter (e.g. tool_use agent — handled later)
         adapter = None
 
     try:
