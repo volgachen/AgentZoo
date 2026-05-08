@@ -18,9 +18,9 @@ The backend exposes a REST + WebSocket API. Each session maps to one agent adapt
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0
-# API available at http://<your-ip>:8000
-# Docs at http://<your-ip>:8000/docs
+uvicorn app.main:app --reload --host 0.0.0.0 --port 12598
+# API available at http://<your-ip>:12598
+# Docs at http://<your-ip>:12598/docs
 ```
 
 **Frontend**
@@ -28,8 +28,8 @@ uvicorn app.main:app --reload --host 0.0.0.0
 ```bash
 cd frontend
 npm install
-npm run dev -- --host
-# Dashboard at http://<your-ip>:5173
+npm run dev
+# Dashboard at http://<your-ip>:12599
 ```
 
 ## API

@@ -1,7 +1,7 @@
 import type { AgentTemplate, Session, Message } from "./types";
 
 // Use the same host the browser connected to, so the app works on any machine in the LAN.
-const API_HOST = `${window.location.hostname}:8000`;
+const API_HOST = `${window.location.hostname}:12598`;
 const BASE = `http://${API_HOST}/api/v1`;
 const WS_BASE = `ws://${API_HOST}/api/v1`;
 
