@@ -1,7 +1,9 @@
 import type { AgentTemplate, Session, Message } from "./types";
 
-const BASE = "http://localhost:8000/api/v1";
-const WS_BASE = "ws://localhost:8000/api/v1";
+// Use the same host the browser connected to, so the app works on any machine in the LAN.
+const API_HOST = `${window.location.hostname}:8000`;
+const BASE = `http://${API_HOST}/api/v1`;
+const WS_BASE = `ws://${API_HOST}/api/v1`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
