@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 import shutil
 import uuid
 from typing import AsyncGenerator
 from app.adapters.base import BaseAgentAdapter, StreamEvent, StreamEventType
+
+logger = logging.getLogger("agentzoo.adapter.claude_code")
 
 
 class ClaudeCodeAdapter(BaseAgentAdapter):
@@ -74,6 +77,13 @@ class ClaudeCodeAdapter(BaseAgentAdapter):
         else:
             args += ["--resume", self._claude_session_id]
 
+        logger.info(
+            "spawn claude turn=%d claude_session=%s cwd=%s",
+            self._turn_count, self._claude_session_id, self._working_dir,
+        )
+        logger.debug("argv: %s", args)
+        logger.debug("stdin: %r", message)
+
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdin=asyncio.subprocess.PIPE,
@@ -96,6 +106,7 @@ class ClaudeCodeAdapter(BaseAgentAdapter):
                 line = line_bytes.decode(errors="replace").strip()
                 if not line:
                     continue
+                logger.debug("stdout line: %s", line[:500])
                 for event in self._parse_line(line):
                     yield event
                     if event.type in (StreamEventType.DONE, StreamEventType.ERROR):
@@ -104,6 +115,10 @@ class ClaudeCodeAdapter(BaseAgentAdapter):
             if proc.returncode is None:
                 proc.terminate()
                 await proc.wait()
+            stderr = await proc.stderr.read() if proc.stderr else b""
+            if stderr:
+                logger.warning("claude stderr (rc=%s): %s", proc.returncode, stderr.decode(errors="replace")[:2000])
+            logger.info("claude exited rc=%s", proc.returncode)
             self._pending_message = None
 
         yield StreamEvent(type=StreamEventType.DONE, data="")
