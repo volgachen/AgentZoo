@@ -15,6 +15,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 class CreateSessionRequest(BaseModel):
     agent_id: str
     initial_prompt: str = ""
+    working_dir: str | None = None
 
 
 @router.post("", response_model=Session, status_code=201)
@@ -28,10 +29,10 @@ async def create_session(
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    session = await db.create_session(body.agent_id)
+    session = await db.create_session(body.agent_id, working_dir=body.working_dir)
 
     if agent.agent_type == AgentType.CLAUDE_CODE:
-        adapter = ClaudeCodeAdapter()
+        adapter = ClaudeCodeAdapter(working_dir=body.working_dir)
         try:
             await adapter.start(agent.system_prompt)
         except RuntimeError as e:

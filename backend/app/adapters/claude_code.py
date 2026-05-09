@@ -16,9 +16,10 @@ class ClaudeCodeAdapter(BaseAgentAdapter):
     history on disk.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, working_dir: str | None = None) -> None:
         self._claude_session_id: str = str(uuid.uuid4())
         self._system_prompt: str = ""
+        self._working_dir: str | None = working_dir
         self._turn_count: int = 0
         self._alive: bool = False
 
@@ -30,6 +31,10 @@ class ClaudeCodeAdapter(BaseAgentAdapter):
         claude_bin = shutil.which("claude")
         if claude_bin is None:
             raise RuntimeError("'claude' CLI not found in PATH")
+        if self._working_dir is not None:
+            import os
+            if not os.path.isdir(self._working_dir):
+                raise RuntimeError(f"working_dir does not exist: {self._working_dir}")
         self._system_prompt = system_prompt
         self._alive = True
 
@@ -74,6 +79,7 @@ class ClaudeCodeAdapter(BaseAgentAdapter):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=self._working_dir,
         )
 
         proc.stdin.write((message.strip() + "\n").encode())

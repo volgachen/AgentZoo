@@ -13,7 +13,7 @@ interface Store {
   activeSessionId: string | null;
 
   setActiveSession: (id: string | null) => void;
-  launchSession: (agentId: string, initialPrompt?: string) => Promise<string>;
+  launchSession: (agentId: string, initialPrompt?: string, workingDir?: string | null) => Promise<string>;
   sendMessage: (sessionId: string, content: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
   refreshSession: (sessionId: string) => Promise<void>;
@@ -25,8 +25,8 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveSession: (id) => set({ activeSessionId: id }),
 
-  launchSession: async (agentId, initialPrompt = "") => {
-    const session = await api.sessions.create(agentId, initialPrompt);
+  launchSession: async (agentId, initialPrompt = "", workingDir = null) => {
+    const session = await api.sessions.create(agentId, initialPrompt, workingDir);
     const socket = createSessionSocket(session.id);
 
     set((s) => ({

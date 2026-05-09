@@ -23,6 +23,7 @@ export interface AgentTemplate {
 export interface Session {
   id: string;
   agent_id: string;
+  working_dir: string | null;
   status: SessionStatus;
   created_at: string;
   updated_at: string;

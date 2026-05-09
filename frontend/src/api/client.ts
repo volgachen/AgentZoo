@@ -23,10 +23,10 @@ export const api = {
     get: (id: string) => request<AgentTemplate>(`/agents/${id}`),
   },
   sessions: {
-    create: (agent_id: string, initial_prompt = "") =>
+    create: (agent_id: string, initial_prompt = "", working_dir: string | null = null) =>
       request<Session>("/sessions", {
         method: "POST",
-        body: JSON.stringify({ agent_id, initial_prompt }),
+        body: JSON.stringify({ agent_id, initial_prompt, working_dir }),
       }),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),

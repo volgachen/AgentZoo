@@ -14,6 +14,7 @@ export default function AgentRegistry() {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [workingDirs, setWorkingDirs] = useState<Record<string, string>>({});
   const launchSession = useStore((s) => s.launchSession);
   const setActive = useStore((s) => s.setActiveSession);
   const navigate = useNavigate();
@@ -28,7 +29,12 @@ export default function AgentRegistry() {
   const handleLaunch = async (agentId: string) => {
     setLaunching(agentId);
     try {
-      const sessionId = await launchSession(agentId, prompts[agentId] ?? "");
+      const dir = (workingDirs[agentId] ?? "").trim();
+      const sessionId = await launchSession(
+        agentId,
+        prompts[agentId] ?? "",
+        dir || null,
+      );
       setActive(sessionId);
       navigate(`/console/${sessionId}`);
     } finally {
@@ -67,6 +73,15 @@ export default function AgentRegistry() {
               value={prompts[agent.id] ?? ""}
               onChange={(e) =>
                 setPrompts((p) => ({ ...p, [agent.id]: e.target.value }))
+              }
+            />
+            <input
+              type="text"
+              className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500 font-mono"
+              placeholder="Working directory (optional, e.g. /home/me/project)"
+              value={workingDirs[agent.id] ?? ""}
+              onChange={(e) =>
+                setWorkingDirs((p) => ({ ...p, [agent.id]: e.target.value }))
               }
             />
             <button

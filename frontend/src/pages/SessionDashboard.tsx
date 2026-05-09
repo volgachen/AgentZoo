@@ -41,6 +41,7 @@ export default function SessionDashboard() {
             <tr className="text-gray-400 border-b border-gray-700">
               <th className="pb-3 pr-4 font-medium">Session ID</th>
               <th className="pb-3 pr-4 font-medium">Agent</th>
+              <th className="pb-3 pr-4 font-medium">Working Dir</th>
               <th className="pb-3 pr-4 font-medium">Status</th>
               <th className="pb-3 pr-4 font-medium">Events</th>
               <th className="pb-3 font-medium">Actions</th>
@@ -56,6 +57,9 @@ export default function SessionDashboard() {
                   {session.id.slice(0, 8)}…
                 </td>
                 <td className="py-3 pr-4 text-gray-300">{session.agent_id}</td>
+                <td className="py-3 pr-4 font-mono text-gray-400 text-xs">
+                  {session.working_dir ?? <span className="text-gray-600">—</span>}
+                </td>
                 <td className="py-3 pr-4">
                   <span
                     className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[session.status]}`}
