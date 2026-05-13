@@ -9,7 +9,13 @@ export type SessionStatus =
 
 export type MessageRole = "system" | "user" | "agent" | "tool";
 
-export type StreamEventType = "text" | "tool_call" | "status" | "error" | "done";
+export type StreamEventType =
+  | "text"
+  | "tool_call"
+  | "status"
+  | "error"
+  | "done"
+  | "user";
 
 export interface AgentTemplate {
   id: string;

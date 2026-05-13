@@ -11,6 +11,7 @@ const EVENT_STYLE: Record<string, string> = {
   done: "text-green-500",
   session_state: "text-gray-500",
   agent_message: "text-gray-200",
+  user: "text-indigo-300",
 };
 
 function EventLine({ event }: { event: StreamEvent }) {
@@ -24,7 +25,9 @@ function EventLine({ event }: { event: StreamEvent }) {
           ? "✗ "
           : event.type === "done"
             ? "✓ "
-            : "";
+            : event.type === "user"
+              ? "❯ "
+              : "";
   const body = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
   return (
     <div className={`font-mono text-sm whitespace-pre-wrap break-all ${style}`}>

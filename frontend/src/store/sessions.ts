@@ -34,10 +34,14 @@ export const useStore = create<Store>((set, get) => ({
     const session = await api.sessions.create(agentId, initialPrompt, workingDir, templateDir);
     const socket = createSessionSocket(session.id);
 
+    const seedEvents: StreamEvent[] = initialPrompt
+      ? [{ type: "user", data: initialPrompt }]
+      : [];
+
     set((s) => ({
       sessions: {
         ...s.sessions,
-        [session.id]: { session, events: [], socket },
+        [session.id]: { session, events: seedEvents, socket },
       },
     }));
 
@@ -75,6 +79,17 @@ export const useStore = create<Store>((set, get) => ({
     const entry = get().sessions[sessionId];
     if (!entry?.socket) return;
     entry.socket.send(JSON.stringify({ content }));
+    set((s) => {
+      const cur = s.sessions[sessionId];
+      if (!cur) return s;
+      const userEvent: StreamEvent = { type: "user", data: content };
+      return {
+        sessions: {
+          ...s.sessions,
+          [sessionId]: { ...cur, events: [...cur.events, userEvent] },
+        },
+      };
+    });
   },
 
   closeSession: async (sessionId) => {
