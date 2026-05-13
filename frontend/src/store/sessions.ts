@@ -6,6 +6,7 @@ interface SessionEntry {
   session: Session;
   events: StreamEvent[];
   socket: WebSocket | null;
+  generating: boolean;
 }
 
 interface Store {
@@ -41,7 +42,12 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => ({
       sessions: {
         ...s.sessions,
-        [session.id]: { session, events: seedEvents, socket },
+        [session.id]: {
+          session,
+          events: seedEvents,
+          socket,
+          generating: !!initialPrompt,
+        },
       },
     }));
 
@@ -58,16 +64,31 @@ export const useStore = create<Store>((set, get) => ({
             },
           };
         }
+        const isTerminal = frame.type === "done" || frame.type === "error";
         return {
           sessions: {
             ...s.sessions,
-            [session.id]: { ...entry, events: [...entry.events, frame as StreamEvent] },
+            [session.id]: {
+              ...entry,
+              events: [...entry.events, frame as StreamEvent],
+              generating: isTerminal ? false : entry.generating,
+            },
           },
         };
       });
     };
 
     socket.onclose = () => {
+      set((s) => {
+        const entry = s.sessions[session.id];
+        if (!entry) return s;
+        return {
+          sessions: {
+            ...s.sessions,
+            [session.id]: { ...entry, generating: false },
+          },
+        };
+      });
       // Refresh session status from server on disconnect
       get().refreshSession(session.id);
     };
@@ -86,7 +107,11 @@ export const useStore = create<Store>((set, get) => ({
       return {
         sessions: {
           ...s.sessions,
-          [sessionId]: { ...cur, events: [...cur.events, userEvent] },
+          [sessionId]: {
+            ...cur,
+            events: [...cur.events, userEvent],
+            generating: true,
+          },
         },
       };
     });

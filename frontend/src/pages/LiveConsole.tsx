@@ -66,10 +66,11 @@ export default function LiveConsole() {
   }
 
   const { session, events } = entry;
+  const generating = entry.generating;
 
   const handleSend = () => {
     const msg = input.trim();
-    if (!msg || !sessionId) return;
+    if (!msg || !sessionId || generating) return;
     sendMessage(sessionId, msg);
     setInput("");
   };
@@ -89,17 +90,29 @@ export default function LiveConsole() {
           <h1 className="text-lg font-semibold text-white">Live Console</h1>
           <p className="text-xs text-gray-500 font-mono">{session.id}</p>
         </div>
-        <span
-          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-            session.status === "RUNNING"
-              ? "bg-green-900 text-green-300"
-              : session.status === "ERROR"
-                ? "bg-red-900 text-red-300"
-                : "bg-gray-700 text-gray-400"
-          }`}
-        >
-          {session.status}
-        </span>
+        <div className="flex items-center gap-2">
+          {generating ? (
+            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-900/60 text-indigo-200">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-300 animate-pulse" />
+              generating…
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-800 text-gray-400">
+              idle
+            </span>
+          )}
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+              session.status === "RUNNING"
+                ? "bg-green-900 text-green-300"
+                : session.status === "ERROR"
+                  ? "bg-red-900 text-red-300"
+                  : "bg-gray-700 text-gray-400"
+            }`}
+          >
+            {session.status}
+          </span>
+        </div>
       </div>
 
       {/* Event log */}
@@ -116,19 +129,24 @@ export default function LiveConsole() {
       {/* Input */}
       <div className="flex gap-2">
         <textarea
-          className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:border-indigo-500"
+          className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:border-indigo-500 disabled:opacity-50"
           rows={2}
-          placeholder="Send a message… (Enter to send, Shift+Enter for newline)"
+          placeholder={
+            generating
+              ? "Agent is generating… wait for it to finish"
+              : "Send a message… (Enter to send, Shift+Enter for newline)"
+          }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
+          disabled={generating}
         />
         <button
           onClick={handleSend}
-          disabled={!input.trim()}
+          disabled={!input.trim() || generating}
           className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium transition-colors self-end"
         >
-          Send
+          {generating ? "…" : "Send"}
         </button>
       </div>
     </div>
