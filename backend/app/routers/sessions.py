@@ -1,5 +1,7 @@
 import json
 import logging
+import shutil
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from app.db.interface import IAgentDatabase
@@ -18,6 +20,9 @@ class CreateSessionRequest(BaseModel):
     agent_id: str
     initial_prompt: str = ""
     working_dir: str | None = None
+    # When set, the server copies template_dir -> working_dir before starting
+    # the adapter. working_dir must not already exist in that case.
+    template_dir: str | None = None
 
 
 @router.post("", response_model=Session, status_code=201)
@@ -26,18 +31,45 @@ async def create_session(
     db: IAgentDatabase = Depends(get_db),
     registry: AdapterRegistry = Depends(get_registry),
 ):
-    logger.info("create_session agent=%s working_dir=%s", body.agent_id, body.working_dir)
+    logger.info(
+        "create_session agent=%s working_dir=%s template_dir=%s",
+        body.agent_id, body.working_dir, body.template_dir,
+    )
     try:
         agent = await db.get_agent(body.agent_id)
     except KeyError as e:
         logger.warning("create_session: agent not found: %s", body.agent_id)
         raise HTTPException(status_code=404, detail=str(e))
 
-    session = await db.create_session(body.agent_id, working_dir=body.working_dir)
+    working_dir = body.working_dir
+    if body.template_dir:
+        if not working_dir:
+            raise HTTPException(
+                status_code=400,
+                detail="working_dir is required when template_dir is set (it is the copy target)",
+            )
+        src = Path(body.template_dir)
+        dst = Path(working_dir)
+        if not src.is_dir():
+            raise HTTPException(status_code=400, detail=f"template_dir does not exist: {src}")
+        if dst.exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f"working_dir already exists, refusing to overwrite: {dst}",
+            )
+        try:
+            shutil.copytree(src, dst)
+        except (OSError, shutil.Error) as e:
+            logger.exception("copytree failed src=%s dst=%s", src, dst)
+            raise HTTPException(status_code=500, detail=f"copy failed: {e}")
+        working_dir = str(dst.resolve())
+        logger.info("copied template %s -> %s", src, working_dir)
+
+    session = await db.create_session(body.agent_id, working_dir=working_dir)
     logger.debug("session created id=%s status=%s", session.id, session.status)
 
     if agent.agent_type == AgentType.CLAUDE_CODE:
-        adapter = ClaudeCodeAdapter(working_dir=body.working_dir)
+        adapter = ClaudeCodeAdapter(working_dir=working_dir)
         try:
             await adapter.start(agent.system_prompt)
         except RuntimeError as e:

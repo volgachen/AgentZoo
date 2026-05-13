@@ -17,21 +17,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+export interface BrowseResponse {
+  path: string;
+  parent: string | null;
+  entries: DirEntry[];
+}
+
+function browseQuery(path: string | null | undefined): string {
+  return path ? `?path=${encodeURIComponent(path)}` : "";
+}
+
 export const api = {
   agents: {
     list: () => request<AgentTemplate[]>("/agents"),
     get: (id: string) => request<AgentTemplate>(`/agents/${id}`),
   },
   sessions: {
-    create: (agent_id: string, initial_prompt = "", working_dir: string | null = null) =>
+    create: (
+      agent_id: string,
+      initial_prompt = "",
+      working_dir: string | null = null,
+      template_dir: string | null = null,
+    ) =>
       request<Session>("/sessions", {
         method: "POST",
-        body: JSON.stringify({ agent_id, initial_prompt, working_dir }),
+        body: JSON.stringify({ agent_id, initial_prompt, working_dir, template_dir }),
       }),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),
     delete: (id: string) =>
       request<void>(`/sessions/${id}`, { method: "DELETE" }),
+  },
+  fs: {
+    browse: (path?: string | null) =>
+      request<BrowseResponse>(`/fs/browse${browseQuery(path)}`),
+    templates: (path?: string | null) =>
+      request<BrowseResponse>(`/fs/templates${browseQuery(path)}`),
+    home: () => request<{ home: string; templates_root: string }>("/fs/home"),
   },
 };
 

@@ -3,18 +3,26 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { AgentTemplate } from "../api/types";
 import { useStore } from "../store/sessions";
+import WorkingDirPicker from "../components/WorkingDirPicker";
 
 const AGENT_TYPE_LABEL: Record<string, string> = {
   tool_use: "Tool Use",
   claude_code: "Claude Code",
 };
 
+interface DirSelection {
+  workingDir: string;
+  templateDir: string | null;
+}
+
 export default function AgentRegistry() {
   const [agents, setAgents] = useState<AgentTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Record<string, string>>({});
-  const [workingDirs, setWorkingDirs] = useState<Record<string, string>>({});
+  const [dirs, setDirs] = useState<Record<string, DirSelection>>({});
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
   const launchSession = useStore((s) => s.launchSession);
   const setActive = useStore((s) => s.setActiveSession);
   const navigate = useNavigate();
@@ -28,15 +36,19 @@ export default function AgentRegistry() {
 
   const handleLaunch = async (agentId: string) => {
     setLaunching(agentId);
+    setLaunchError(null);
     try {
-      const dir = (workingDirs[agentId] ?? "").trim();
+      const sel = dirs[agentId];
       const sessionId = await launchSession(
         agentId,
         prompts[agentId] ?? "",
-        dir || null,
+        sel?.workingDir ?? null,
+        sel?.templateDir ?? null,
       );
       setActive(sessionId);
       navigate(`/console/${sessionId}`);
+    } catch (e) {
+      setLaunchError((e as Error).message);
     } finally {
       setLaunching(null);
     }
@@ -53,47 +65,98 @@ export default function AgentRegistry() {
   return (
     <div className="p-6">
       <h1 className="text-2xl font-semibold text-white mb-6">Agent Registry</h1>
+      {launchError && (
+        <div className="mb-4 px-3 py-2 rounded-lg bg-red-900/40 border border-red-800 text-red-200 text-sm font-mono">
+          {launchError}
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {agents.map((agent) => (
-          <div
-            key={agent.id}
-            className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex flex-col gap-3"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="text-lg font-medium text-white">{agent.name}</h2>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300 whitespace-nowrap">
-                {AGENT_TYPE_LABEL[agent.agent_type] ?? agent.agent_type}
-              </span>
-            </div>
-            <p className="text-sm text-gray-400 flex-1">{agent.description}</p>
-            <textarea
-              className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:border-indigo-500"
-              rows={2}
-              placeholder="Initial prompt (optional)"
-              value={prompts[agent.id] ?? ""}
-              onChange={(e) =>
-                setPrompts((p) => ({ ...p, [agent.id]: e.target.value }))
-              }
-            />
-            <input
-              type="text"
-              className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500 font-mono"
-              placeholder="Working directory (optional, e.g. /home/me/project)"
-              value={workingDirs[agent.id] ?? ""}
-              onChange={(e) =>
-                setWorkingDirs((p) => ({ ...p, [agent.id]: e.target.value }))
-              }
-            />
-            <button
-              onClick={() => handleLaunch(agent.id)}
-              disabled={launching === agent.id}
-              className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+        {agents.map((agent) => {
+          const sel = dirs[agent.id];
+          return (
+            <div
+              key={agent.id}
+              className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex flex-col gap-3"
             >
-              {launching === agent.id ? "Launching..." : "Launch"}
-            </button>
-          </div>
-        ))}
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="text-lg font-medium text-white">{agent.name}</h2>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300 whitespace-nowrap">
+                  {AGENT_TYPE_LABEL[agent.agent_type] ?? agent.agent_type}
+                </span>
+              </div>
+              <p className="text-sm text-gray-400 flex-1">{agent.description}</p>
+              <textarea
+                className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:border-indigo-500"
+                rows={2}
+                placeholder="Initial prompt (optional)"
+                value={prompts[agent.id] ?? ""}
+                onChange={(e) =>
+                  setPrompts((p) => ({ ...p, [agent.id]: e.target.value }))
+                }
+              />
+
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPickerFor(agent.id)}
+                    className="px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-600 hover:border-indigo-500 text-sm text-gray-200"
+                  >
+                    {sel ? "Change directory…" : "Choose directory…"}
+                  </button>
+                  {sel && (
+                    <button
+                      onClick={() =>
+                        setDirs((d) => {
+                          const { [agent.id]: _, ...rest } = d;
+                          return rest;
+                        })
+                      }
+                      className="text-xs text-gray-500 hover:text-gray-300"
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+                {sel && (
+                  <div className="text-xs font-mono text-gray-400 bg-gray-900/60 border border-gray-800 rounded px-2 py-1 space-y-0.5">
+                    {sel.templateDir ? (
+                      <>
+                        <div>
+                          <span className="text-gray-500">template:</span> {sel.templateDir}
+                        </div>
+                        <div>
+                          <span className="text-gray-500">→ target:</span> {sel.workingDir}
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <span className="text-gray-500">dir:</span> {sel.workingDir}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => handleLaunch(agent.id)}
+                disabled={launching === agent.id}
+                className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                {launching === agent.id ? "Launching..." : "Launch"}
+              </button>
+            </div>
+          );
+        })}
       </div>
+
+      <WorkingDirPicker
+        open={pickerFor !== null}
+        onClose={() => setPickerFor(null)}
+        onConfirm={(value) => {
+          if (pickerFor) setDirs((d) => ({ ...d, [pickerFor]: value }));
+          setPickerFor(null);
+        }}
+      />
     </div>
   );
 }
