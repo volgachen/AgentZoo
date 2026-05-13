@@ -25,10 +25,11 @@ function EventLine({ event }: { event: StreamEvent }) {
           : event.type === "done"
             ? "✓ "
             : "";
+  const body = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
   return (
     <div className={`font-mono text-sm whitespace-pre-wrap break-all ${style}`}>
       {prefix}
-      {event.data}
+      {body}
     </div>
   );
 }

@@ -42,14 +42,22 @@ export const useStore = create<Store>((set, get) => ({
     }));
 
     socket.onmessage = (e) => {
-      const event: StreamEvent = JSON.parse(e.data);
+      const frame = JSON.parse(e.data);
       set((s) => {
         const entry = s.sessions[session.id];
         if (!entry) return s;
+        if (frame.type === "session_state") {
+          return {
+            sessions: {
+              ...s.sessions,
+              [session.id]: { ...entry, session: frame.data as Session },
+            },
+          };
+        }
         return {
           sessions: {
             ...s.sessions,
-            [session.id]: { ...entry, events: [...entry.events, event] },
+            [session.id]: { ...entry, events: [...entry.events, frame as StreamEvent] },
           },
         };
       });

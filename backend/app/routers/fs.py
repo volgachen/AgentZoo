@@ -82,7 +82,7 @@ def _list_dir(target: Path, root: Path | None = None) -> BrowseResponse:
 
 @router.get("/browse", response_model=BrowseResponse)
 async def browse(path: str | None = Query(default=None)):
-    target = Path(path) if path else _HOME
+    target = Path(path) if path else _REPO_ROOT
     return _list_dir(target, root=None)
 
 
@@ -96,4 +96,8 @@ async def browse_templates(path: str | None = Query(default=None)):
 
 @router.get("/home")
 async def home():
-    return {"home": str(_HOME), "templates_root": str(_TEMPLATES_ROOT)}
+    return {
+        "home": str(_HOME),
+        "project_root": str(_REPO_ROOT),
+        "templates_root": str(_TEMPLATES_ROOT),
+    }
