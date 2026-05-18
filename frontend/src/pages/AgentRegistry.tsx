@@ -20,7 +20,6 @@ export default function AgentRegistry() {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
-  const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [dirs, setDirs] = useState<Record<string, DirSelection>>({});
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const launchSession = useStore((s) => s.launchSession);
@@ -41,7 +40,6 @@ export default function AgentRegistry() {
       const sel = dirs[agentId];
       const sessionId = await launchSession(
         agentId,
-        prompts[agentId] ?? "",
         sel?.workingDir ?? null,
         sel?.templateDir ?? null,
       );
@@ -85,15 +83,6 @@ export default function AgentRegistry() {
                 </span>
               </div>
               <p className="text-sm text-gray-400 flex-1">{agent.description}</p>
-              <textarea
-                className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:border-indigo-500"
-                rows={2}
-                placeholder="Initial prompt (optional)"
-                value={prompts[agent.id] ?? ""}
-                onChange={(e) =>
-                  setPrompts((p) => ({ ...p, [agent.id]: e.target.value }))
-                }
-              />
 
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">

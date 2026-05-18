@@ -18,7 +18,6 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 class CreateSessionRequest(BaseModel):
     agent_id: str
-    initial_prompt: str = ""
     working_dir: str | None = None
     # When set, the server copies template_dir -> working_dir before starting
     # the adapter. working_dir must not already exist in that case.
@@ -95,9 +94,6 @@ async def create_session(
             "registered OpenAIToolUseAdapter for session=%s tools=%s",
             session.id, agent.tool_names,
         )
-
-    if body.initial_prompt:
-        await db.add_message(session.id, MessageRole.USER, body.initial_prompt)
 
     await db.update_session_status(session.id, SessionStatus.RUNNING)
     return await db.get_session(session.id)
