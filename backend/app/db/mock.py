@@ -3,7 +3,8 @@ from typing import Dict, List
 from app.db.interface import IAgentDatabase
 from app.models.domain import (
     AgentTemplate, AgentType, Session, SessionStatus,
-    Message, MessageRole
+    Message, MessageRole,
+    Plugin, PluginStatus,
 )
 
 
@@ -31,6 +32,7 @@ class MockMemoryDatabase(IAgentDatabase):
         self._agents: Dict[str, AgentTemplate] = {a.id: a for a in _SEED_AGENTS}
         self._sessions: Dict[str, Session] = {}
         self._messages: Dict[str, List[Message]] = {}
+        self._plugins: Dict[str, Plugin] = {}
 
     async def list_agents(self) -> List[AgentTemplate]:
         return list(self._agents.values())
@@ -69,3 +71,63 @@ class MockMemoryDatabase(IAgentDatabase):
     async def get_messages(self, session_id: str) -> List[Message]:
         await self.get_session(session_id)
         return list(self._messages[session_id])
+
+    # ------- Plugins -------
+
+    async def list_plugins(self) -> List[Plugin]:
+        return list(self._plugins.values())
+
+    async def get_plugin(self, plugin_id: str) -> Plugin:
+        plugin = self._plugins.get(plugin_id)
+        if plugin is None:
+            raise KeyError(f"Plugin '{plugin_id}' not found")
+        return plugin
+
+    async def create_plugin(self, name: str, code: str) -> Plugin:
+        plugin = Plugin(name=name, code=code)
+        self._plugins[plugin.id] = plugin
+        return plugin
+
+    async def update_plugin(
+        self,
+        plugin_id: str,
+        *,
+        name: str | None = None,
+        code: str | None = None,
+    ) -> Plugin:
+        plugin = await self.get_plugin(plugin_id)
+        if name is not None:
+            plugin.name = name
+        if code is not None:
+            plugin.code = code
+        plugin.updated_at = datetime.now(timezone.utc)
+        return plugin
+
+    async def delete_plugin(self, plugin_id: str) -> None:
+        await self.get_plugin(plugin_id)
+        del self._plugins[plugin_id]
+
+    async def set_plugin_status(
+        self,
+        plugin_id: str,
+        status: PluginStatus,
+        *,
+        exit_code: int | None = None,
+        error: str | None = None,
+    ) -> Plugin:
+        plugin = await self.get_plugin(plugin_id)
+        now = datetime.now(timezone.utc)
+        plugin.status = status
+        if status == PluginStatus.RUNNING:
+            plugin.last_started_at = now
+            plugin.last_exited_at = None
+            plugin.last_exit_code = None
+            plugin.last_error = None
+        else:
+            plugin.last_exited_at = now
+            if exit_code is not None:
+                plugin.last_exit_code = exit_code
+            if error is not None:
+                plugin.last_error = error
+        plugin.updated_at = now
+        return plugin

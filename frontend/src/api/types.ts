@@ -47,3 +47,33 @@ export interface StreamEvent {
   type: StreamEventType;
   data: string;
 }
+
+export type PluginStatus = "stopped" | "running" | "exited" | "errored";
+
+export interface Plugin {
+  id: string;
+  name: string;
+  code: string;
+  status: PluginStatus;
+  last_started_at: string | null;
+  last_exited_at: string | null;
+  last_exit_code: number | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PluginLogStream = "stdout" | "stderr" | "system";
+
+export interface PluginLogLine {
+  ts: string;
+  stream: PluginLogStream;
+  line: string;
+}
+
+export type PluginWsFrame =
+  | { type: "plugin_state"; data: Plugin }
+  | { type: "log"; data: PluginLogLine }
+  | { type: "status"; data: { status: PluginStatus; error?: string | null } }
+  | { type: "logs_cleared"; data: null }
+  | { type: "error"; data: string };

@@ -53,3 +53,23 @@ class Message(BaseModel):
     role: MessageRole
     content: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PluginStatus(str, Enum):
+    STOPPED = "stopped"
+    RUNNING = "running"
+    EXITED = "exited"
+    ERRORED = "errored"
+
+
+class Plugin(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    code: str
+    status: PluginStatus = PluginStatus.STOPPED
+    last_started_at: Optional[datetime] = None
+    last_exited_at: Optional[datetime] = None
+    last_exit_code: Optional[int] = None
+    last_error: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

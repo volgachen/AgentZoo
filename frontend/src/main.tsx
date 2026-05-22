@@ -6,6 +6,8 @@ import App from "./App.tsx";
 import AgentRegistry from "./pages/AgentRegistry.tsx";
 import SessionDashboard from "./pages/SessionDashboard.tsx";
 import LiveConsole from "./pages/LiveConsole.tsx";
+import PluginRegistry from "./pages/PluginRegistry.tsx";
+import PluginConsole from "./pages/PluginConsole.tsx";
 
 const router = createBrowserRouter([
   {
@@ -15,6 +17,8 @@ const router = createBrowserRouter([
       { index: true, element: <AgentRegistry /> },
       { path: "sessions", element: <SessionDashboard /> },
       { path: "console/:sessionId", element: <LiveConsole /> },
+      { path: "plugins", element: <PluginRegistry /> },
+      { path: "plugins/:pluginId", element: <PluginConsole /> },
     ],
   },
 ]);

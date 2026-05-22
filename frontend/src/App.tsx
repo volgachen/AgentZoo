@@ -1,14 +1,20 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useStore } from "./store/sessions";
+import { usePluginStore } from "./store/plugins";
 
 const NAV = [
   { to: "/", label: "Agent Registry", end: true },
   { to: "/sessions", label: "Sessions" },
+  { to: "/plugins", label: "Plugins" },
 ];
 
 export default function App() {
   const sessions = useStore((s) => s.sessions);
-  const count = Object.keys(sessions).length;
+  const sessionCount = Object.keys(sessions).length;
+  const plugins = usePluginStore((s) => s.plugins);
+  const runningPlugins = Object.values(plugins).filter(
+    (p) => p.plugin.status === "running",
+  ).length;
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
@@ -30,9 +36,14 @@ export default function App() {
               }
             >
               {label}
-              {label === "Sessions" && count > 0 && (
+              {label === "Sessions" && sessionCount > 0 && (
                 <span className="ml-1.5 text-xs bg-indigo-700 text-white px-1.5 py-0.5 rounded-full">
-                  {count}
+                  {sessionCount}
+                </span>
+              )}
+              {label === "Plugins" && runningPlugins > 0 && (
+                <span className="ml-1.5 text-xs bg-green-700 text-white px-1.5 py-0.5 rounded-full">
+                  {runningPlugins}
                 </span>
               )}
             </NavLink>

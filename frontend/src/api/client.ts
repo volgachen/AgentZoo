@@ -1,4 +1,10 @@
-import type { AgentTemplate, Session, Message } from "./types";
+import type {
+  AgentTemplate,
+  Session,
+  Message,
+  Plugin,
+  PluginLogLine,
+} from "./types";
 
 // Use the same host the browser connected to, so the app works on any machine in the LAN.
 const API_HOST = `${window.location.hostname}:12598`;
@@ -60,8 +66,38 @@ export const api = {
       request<BrowseResponse>(`/fs/templates${browseQuery(path)}`),
     home: () => request<{ home: string; templates_root: string }>("/fs/home"),
   },
+  plugins: {
+    list: () => request<Plugin[]>("/plugins"),
+    get: (id: string) => request<Plugin>(`/plugins/${id}`),
+    create: (name: string, code: string) =>
+      request<Plugin>("/plugins", {
+        method: "POST",
+        body: JSON.stringify({ name, code }),
+      }),
+    update: (id: string, body: { name?: string; code?: string }) =>
+      request<Plugin>(`/plugins/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) =>
+      request<void>(`/plugins/${id}`, { method: "DELETE" }),
+    start: (id: string) =>
+      request<Plugin>(`/plugins/${id}/start`, { method: "POST" }),
+    stop: (id: string) =>
+      request<Plugin>(`/plugins/${id}/stop`, { method: "POST" }),
+    restart: (id: string) =>
+      request<Plugin>(`/plugins/${id}/restart`, { method: "POST" }),
+    logs: (id: string) =>
+      request<{ lines: PluginLogLine[] }>(`/plugins/${id}/logs`),
+    clearLogs: (id: string) =>
+      request<void>(`/plugins/${id}/logs/clear`, { method: "POST" }),
+  },
 };
 
 export function createSessionSocket(sessionId: string): WebSocket {
   return new WebSocket(`${WS_BASE}/sessions/${sessionId}/stream`);
+}
+
+export function createPluginSocket(pluginId: string): WebSocket {
+  return new WebSocket(`${WS_BASE}/plugins/${pluginId}/stream`);
 }

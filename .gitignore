@@ -18,3 +18,6 @@ dist/
 
 # OS
 .DS_Store
+
+# Plugin runtime sources
+backend/.plugins/
