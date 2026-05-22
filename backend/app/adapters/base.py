@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 
 class StreamEventType(str, Enum):
+    USER = "user"
     TEXT = "text"
     TOOL_CALL = "tool_call"
     STATUS = "status"

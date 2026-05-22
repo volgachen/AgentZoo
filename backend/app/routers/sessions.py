@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import shutil
@@ -10,7 +11,7 @@ from app.models.domain import Session, SessionStatus, MessageRole, AgentType
 from app.adapters.registry import AdapterRegistry, get_registry
 from app.adapters.claude_code import ClaudeCodeAdapter
 from app.adapters.openai_tool_use import OpenAIToolUseAdapter
-from app.adapters.base import StreamEventType
+from app.core.runner import SessionRunner
 
 logger = logging.getLogger("agentzoo.sessions")
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -22,6 +23,10 @@ class CreateSessionRequest(BaseModel):
     # When set, the server copies template_dir -> working_dir before starting
     # the adapter. working_dir must not already exist in that case.
     template_dir: str | None = None
+
+
+class PostMessageRequest(BaseModel):
+    content: str
 
 
 @router.post("", response_model=Session, status_code=201)
@@ -75,8 +80,10 @@ async def create_session(
             logger.exception("ClaudeCodeAdapter start failed for session=%s", session.id)
             await db.update_session_status(session.id, SessionStatus.ERROR)
             raise HTTPException(status_code=500, detail=str(e))
-        registry.register(session.id, adapter)
-        logger.info("registered ClaudeCodeAdapter for session=%s", session.id)
+        runner = SessionRunner(session.id, adapter, db)
+        await runner.start()
+        registry.register(session.id, runner)
+        logger.info("registered ClaudeCodeAdapter runner for session=%s", session.id)
     elif agent.agent_type == AgentType.TOOL_USE:
         adapter = OpenAIToolUseAdapter(
             tool_names=agent.tool_names,
@@ -89,9 +96,11 @@ async def create_session(
             logger.exception("OpenAIToolUseAdapter start failed for session=%s", session.id)
             await db.update_session_status(session.id, SessionStatus.ERROR)
             raise HTTPException(status_code=500, detail=str(e))
-        registry.register(session.id, adapter)
+        runner = SessionRunner(session.id, adapter, db)
+        await runner.start()
+        registry.register(session.id, runner)
         logger.info(
-            "registered OpenAIToolUseAdapter for session=%s tools=%s",
+            "registered OpenAIToolUseAdapter runner for session=%s tools=%s",
             session.id, agent.tool_names,
         )
 
@@ -113,6 +122,26 @@ async def get_messages(session_id: str, db: IAgentDatabase = Depends(get_db)):
         return await db.get_messages(session_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{session_id}/messages", status_code=202)
+async def post_message(
+    session_id: str,
+    body: PostMessageRequest,
+    db: IAgentDatabase = Depends(get_db),
+    registry: AdapterRegistry = Depends(get_registry),
+):
+    try:
+        await db.get_session(session_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        runner = registry.get(session_id)
+    except KeyError:
+        raise HTTPException(status_code=409, detail="session has no live adapter")
+    logger.info("HTTP submit session=%s len=%d", session_id, len(body.content))
+    await runner.submit(body.content)
+    return {"status": "queued"}
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -152,49 +181,63 @@ async def session_stream(
     await ws.send_text(json.dumps({"type": "session_state", "data": session.model_dump(mode="json")}))
 
     try:
-        adapter = registry.get(session_id)
+        runner = registry.get(session_id)
     except KeyError:
-        adapter = None
-        logger.warning("WS session=%s has no live adapter (post-restart?)", session_id)
+        logger.warning("WS session=%s has no live runner (post-restart?)", session_id)
+        await _stub_loop(ws, session_id, db)
+        return
 
-    try:
+    async def inbound() -> None:
         while True:
             raw = await ws.receive_text()
             payload = json.loads(raw)
-            user_content = payload.get("content", "")
-            logger.info("WS recv session=%s len=%d", session_id, len(user_content))
-            logger.debug("WS recv session=%s content=%r", session_id, user_content)
-            await db.add_message(session_id, MessageRole.USER, user_content)
+            content = payload.get("content", "")
+            logger.info("WS recv session=%s len=%d", session_id, len(content))
+            await runner.submit(content)
 
-            if adapter is None:
-                stub = f"[stub] Received: {user_content}"
-                await db.add_message(session_id, MessageRole.AGENT, stub)
-                await ws.send_text(json.dumps({"type": "agent_message", "data": stub}))
-                continue
-
-            await adapter.send(user_content)
-
-            agent_buf: list[str] = []
-            event_count = 0
-            async for event in adapter.stream():
-                event_count += 1
-                logger.debug("WS send session=%s event=%s data=%r",
-                             session_id, event.type, event.data[:200])
+    async def outbound() -> None:
+        async with runner.subscribe() as events:
+            async for event in events:
                 await ws.send_text(event.model_dump_json())
-                if event.type == StreamEventType.TEXT:
-                    agent_buf.append(event.data)
-                elif event.type == StreamEventType.ERROR:
-                    logger.error("session=%s adapter ERROR event: %s", session_id, event.data)
-                    await db.update_session_status(session_id, SessionStatus.ERROR)
-                    break
-            logger.info("WS turn done session=%s events=%d", session_id, event_count)
 
-            if agent_buf:
-                await db.add_message(session_id, MessageRole.AGENT, "\n".join(agent_buf))
-
+    inbound_task = asyncio.create_task(inbound())
+    outbound_task = asyncio.create_task(outbound())
+    try:
+        done, pending = await asyncio.wait(
+            {inbound_task, outbound_task},
+            return_when=asyncio.FIRST_EXCEPTION,
+        )
+        for task in pending:
+            task.cancel()
+        for task in done:
+            exc = task.exception()
+            if exc and not isinstance(exc, WebSocketDisconnect):
+                raise exc
     except WebSocketDisconnect:
         logger.info("WS disconnect session=%s", session_id)
     except Exception as e:
         logger.exception("WS unexpected error session=%s", session_id)
-        await ws.send_text(json.dumps({"type": "error", "data": str(e)}))
-        await ws.close()
+        try:
+            await ws.send_text(json.dumps({"type": "error", "data": str(e)}))
+            await ws.close()
+        except Exception:
+            pass
+    finally:
+        for task in (inbound_task, outbound_task):
+            if not task.done():
+                task.cancel()
+
+
+async def _stub_loop(ws: WebSocket, session_id: str, db: IAgentDatabase) -> None:
+    """Fallback when no live runner exists (post-restart). Echo only."""
+    try:
+        while True:
+            raw = await ws.receive_text()
+            payload = json.loads(raw)
+            content = payload.get("content", "")
+            await db.add_message(session_id, MessageRole.USER, content)
+            stub = f"[stub] Received: {content}"
+            await db.add_message(session_id, MessageRole.AGENT, stub)
+            await ws.send_text(json.dumps({"type": "agent_message", "data": stub}))
+    except WebSocketDisconnect:
+        logger.info("WS disconnect (stub) session=%s", session_id)

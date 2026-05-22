@@ -60,13 +60,18 @@ export const useStore = create<Store>((set, get) => ({
           };
         }
         const isTerminal = frame.type === "done" || frame.type === "error";
+        const isUser = frame.type === "user";
         return {
           sessions: {
             ...s.sessions,
             [session.id]: {
               ...entry,
               events: [...entry.events, frame as StreamEvent],
-              generating: isTerminal ? false : entry.generating,
+              generating: isTerminal
+                ? false
+                : isUser
+                  ? true
+                  : entry.generating,
             },
           },
         };
@@ -98,13 +103,11 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => {
       const cur = s.sessions[sessionId];
       if (!cur) return s;
-      const userEvent: StreamEvent = { type: "user", data: content };
       return {
         sessions: {
           ...s.sessions,
           [sessionId]: {
             ...cur,
-            events: [...cur.events, userEvent],
             generating: true,
           },
         },

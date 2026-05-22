@@ -1,24 +1,24 @@
 from typing import Dict
-from app.adapters.base import BaseAgentAdapter
+from app.core.runner import SessionRunner
 
 
 class AdapterRegistry:
     def __init__(self) -> None:
-        self._adapters: Dict[str, BaseAgentAdapter] = {}
+        self._runners: Dict[str, SessionRunner] = {}
 
-    def register(self, session_id: str, adapter: BaseAgentAdapter) -> None:
-        self._adapters[session_id] = adapter
+    def register(self, session_id: str, runner: SessionRunner) -> None:
+        self._runners[session_id] = runner
 
-    def get(self, session_id: str) -> BaseAgentAdapter:
-        adapter = self._adapters.get(session_id)
-        if adapter is None:
-            raise KeyError(f"No adapter for session '{session_id}'")
-        return adapter
+    def get(self, session_id: str) -> SessionRunner:
+        runner = self._runners.get(session_id)
+        if runner is None:
+            raise KeyError(f"No runner for session '{session_id}'")
+        return runner
 
     async def remove(self, session_id: str) -> None:
-        adapter = self._adapters.pop(session_id, None)
-        if adapter is not None:
-            await adapter.stop()
+        runner = self._runners.pop(session_id, None)
+        if runner is not None:
+            await runner.stop()
 
 
 _registry = AdapterRegistry()
