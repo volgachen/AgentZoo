@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import AsyncIterator
 
 from app.adapters.base import BaseAgentAdapter, StreamEvent, StreamEventType
@@ -10,6 +11,12 @@ from app.models.domain import MessageRole, SessionStatus
 logger = logging.getLogger("agentzoo.runner")
 
 _SUBSCRIBER_QUEUE_MAX = 256
+
+
+@dataclass
+class _InboxItem:
+    content: str
+    from_session_id: str | None = None
 
 
 class SessionRunner:
@@ -31,7 +38,7 @@ class SessionRunner:
         self._session_id = session_id
         self._adapter = adapter
         self._db = db
-        self._inbox: asyncio.Queue[str] = asyncio.Queue()
+        self._inbox: asyncio.Queue[_InboxItem] = asyncio.Queue()
         self._subscribers: set[asyncio.Queue[StreamEvent | None]] = set()
         self._task: asyncio.Task | None = None
         self._generating = False
@@ -64,8 +71,8 @@ class SessionRunner:
         except Exception:
             logger.exception("adapter.stop raised session=%s", self._session_id)
 
-    async def submit(self, content: str) -> None:
-        await self._inbox.put(content)
+    async def submit(self, content: str, from_session_id: str | None = None) -> None:
+        await self._inbox.put(_InboxItem(content=content, from_session_id=from_session_id))
 
     @property
     def is_generating(self) -> bool:
@@ -99,9 +106,9 @@ class SessionRunner:
 
     async def _loop(self) -> None:
         while True:
-            content = await self._inbox.get()
+            item = await self._inbox.get()
             try:
-                await self._run_turn(content)
+                await self._run_turn(item)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -113,15 +120,27 @@ class SessionRunner:
                 except Exception:
                     logger.exception("failed to mark session ERROR session=%s", self._session_id)
 
-    async def _run_turn(self, content: str) -> None:
-        await self._db.add_message(self._session_id, MessageRole.USER, content)
-        self._broadcast(StreamEvent(type=StreamEventType.USER, data=content))
+    async def _run_turn(self, item: _InboxItem) -> None:
+        # Persist the raw content + sender separately; the agent stdin gets a
+        # prefixed view so it can route its reply.
+        await self._db.add_message(
+            self._session_id,
+            MessageRole.USER,
+            item.content,
+            from_session_id=item.from_session_id,
+        )
+        delivered = (
+            f"[from-session:{item.from_session_id}] {item.content}"
+            if item.from_session_id
+            else item.content
+        )
+        self._broadcast(StreamEvent(type=StreamEventType.USER, data=delivered))
 
         self._generating = True
         agent_buf: list[str] = []
         errored = False
         try:
-            await self._adapter.send(content)
+            await self._adapter.send(delivered)
             async for event in self._adapter.stream():
                 self._broadcast(event)
                 if event.type == StreamEventType.TEXT:

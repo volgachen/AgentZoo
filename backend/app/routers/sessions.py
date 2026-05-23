@@ -30,6 +30,7 @@ class CreateSessionRequest(BaseModel):
 
 class PostMessageRequest(BaseModel):
     content: str
+    from_session_id: str | None = None
 
 
 @router.post("", response_model=Session, status_code=201)
@@ -72,22 +73,31 @@ async def create_session(
         working_dir = str(dst.resolve())
         logger.info("copied template %s -> %s", src, working_dir)
 
-    if body.env is not None:
-        if not working_dir:
-            raise HTTPException(
-                status_code=400,
-                detail="working_dir is required when env is set (it is the file destination)",
-            )
-        env_path = Path(working_dir) / ".env"
-        try:
-            env_path.write_text(body.env, encoding="utf-8")
-        except OSError as e:
-            logger.exception("failed to write .env to %s", env_path)
-            raise HTTPException(status_code=500, detail=f"write .env failed: {e}")
-        logger.info("wrote .env to %s (%d bytes)", env_path, len(body.env))
+    if body.env is not None and not working_dir:
+        raise HTTPException(
+            status_code=400,
+            detail="working_dir is required when env is set (it is the file destination)",
+        )
 
     session = await db.create_session(body.agent_id, working_dir=working_dir)
     logger.debug("session created id=%s status=%s", session.id, session.status)
+
+    # Write .env into working_dir if we have one. Always include MY_SESSION_ID
+    # so the agent can address itself when calling other sessions via the
+    # gateway. Operator-supplied env content goes first; the injected line
+    # follows so it wins on duplicate keys when sourced with `set -a`.
+    if working_dir:
+        env_lines: list[str] = []
+        if body.env is not None:
+            env_lines.append(body.env if body.env.endswith("\n") else body.env + "\n")
+        env_lines.append(f"MY_SESSION_ID={session.id}\n")
+        env_path = Path(working_dir) / ".env"
+        try:
+            env_path.write_text("".join(env_lines), encoding="utf-8")
+        except OSError as e:
+            logger.exception("failed to write .env to %s", env_path)
+            raise HTTPException(status_code=500, detail=f"write .env failed: {e}")
+        logger.info("wrote .env to %s", env_path)
 
     if agent.agent_type == AgentType.CLAUDE_CODE:
         adapter = ClaudeCodeAdapter(working_dir=working_dir)
@@ -156,8 +166,9 @@ async def post_message(
         runner = registry.get(session_id)
     except KeyError:
         raise HTTPException(status_code=409, detail="session has no live adapter")
-    logger.info("HTTP submit session=%s len=%d", session_id, len(body.content))
-    await runner.submit(body.content)
+    logger.info("HTTP submit session=%s len=%d from=%s",
+                session_id, len(body.content), body.from_session_id)
+    await runner.submit(body.content, from_session_id=body.from_session_id)
     return {"status": "queued"}
 
 

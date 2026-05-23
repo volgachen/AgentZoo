@@ -52,6 +52,7 @@ class Message(BaseModel):
     session_id: str
     role: MessageRole
     content: str
+    from_session_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

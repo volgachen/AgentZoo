@@ -23,7 +23,14 @@ class IAgentDatabase(ABC):
     async def update_session_status(self, session_id: str, status: SessionStatus) -> Session: pass
 
     @abstractmethod
-    async def add_message(self, session_id: str, role: MessageRole, content: str) -> Message: pass
+    async def add_message(
+        self,
+        session_id: str,
+        role: MessageRole,
+        content: str,
+        *,
+        from_session_id: str | None = None,
+    ) -> Message: pass
 
     @abstractmethod
     async def get_messages(self, session_id: str) -> List[Message]: pass

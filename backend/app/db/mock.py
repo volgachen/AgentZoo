@@ -62,9 +62,21 @@ class MockMemoryDatabase(IAgentDatabase):
         session.updated_at = datetime.now(timezone.utc)
         return session
 
-    async def add_message(self, session_id: str, role: MessageRole, content: str) -> Message:
+    async def add_message(
+        self,
+        session_id: str,
+        role: MessageRole,
+        content: str,
+        *,
+        from_session_id: str | None = None,
+    ) -> Message:
         await self.get_session(session_id)  # validate session exists
-        message = Message(session_id=session_id, role=role, content=content)
+        message = Message(
+            session_id=session_id,
+            role=role,
+            content=content,
+            from_session_id=from_session_id,
+        )
         self._messages[session_id].append(message)
         return message
 
