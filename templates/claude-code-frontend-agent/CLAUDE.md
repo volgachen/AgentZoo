@@ -26,26 +26,43 @@ The gateway exposes `POST /api/v1/sessions/{wiki_session_id}/messages` — fire-
 
 ### Configuration
 
-Two values you need, both provided in your working directory at session launch:
+Two values you need, both written into a single `.env` file in your working
+directory when the operator launches the session:
 
-- `.gateway-url` — single line, e.g. `http://localhost:12598`. Default to `http://localhost:12598` if the file is missing.
-- `.wiki-session-id` — single line, the UUID of the live wiki-agent session.
+```
+GATEWAY_URL=http://localhost:12598
+WIKI_SESSION_ID=<uuid of the running wiki-agent session>
+```
 
-Read them once at the top of any turn that needs to call the wiki. Don't cache across turns — each turn is a fresh subprocess.
+`.env` may be missing on a misconfigured launch — in that case `GATEWAY_URL`
+defaults to `http://localhost:12598` but `WIKI_SESSION_ID` has no sensible
+default. If it's not set, tell the audience you can't reach the knowledge
+base right now and continue without it; don't fabricate.
+
+Load it at the top of any turn that needs to call the wiki — each turn is a
+fresh subprocess, so the variables don't persist across turns:
+
+```bash
+set -a; [ -f .env ] && . ./.env; set +a
+```
 
 ### The recipe
 
 ```bash
-GATEWAY=$(cat .gateway-url 2>/dev/null || echo http://localhost:12598)
-WIKI=$(cat .wiki-session-id)
-curl -sS -X POST "$GATEWAY/api/v1/sessions/$WIKI/messages" \
+set -a; [ -f .env ] && . ./.env; set +a
+: "${GATEWAY_URL:=http://localhost:12598}"
+curl -sS -X POST "$GATEWAY_URL/api/v1/sessions/$WIKI_SESSION_ID/messages" \
   -H 'content-type: application/json' \
   -d "$(jq -nc --arg c 'Look up the canonical "Attention is All You Need" article. I need authors, year, and a one-line summary.' '{content:$c}')"
 ```
 
-Always pipe your `content` through `jq -nc --arg ... '{content:$c}'` (or another safe JSON encoder). Hand-rolled `"{\"content\":\"...\"}"` will explode on quotes, newlines, or apostrophes in the question.
+Always pipe your `content` through `jq -nc --arg ... '{content:$c}'` (or
+another safe JSON encoder). Hand-rolled `"{\"content\":\"...\"}"` will
+explode on quotes, newlines, or apostrophes in the question.
 
-A 202 response means queued. A non-2xx response means the call failed — surface it to the audience as "let me check that and get back to you", and try again next turn.
+A 202 response means queued. A non-2xx response means the call failed —
+surface it to the audience as "let me check that and get back to you", and
+try again next turn.
 
 ### What a turn looks like
 
