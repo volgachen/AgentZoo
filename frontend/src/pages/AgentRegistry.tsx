@@ -13,6 +13,7 @@ const AGENT_TYPE_LABEL: Record<string, string> = {
 interface DirSelection {
   workingDir: string;
   templateDir: string | null;
+  env: string | null;
 }
 
 export default function AgentRegistry() {
@@ -42,6 +43,7 @@ export default function AgentRegistry() {
         agentId,
         sel?.workingDir ?? null,
         sel?.templateDir ?? null,
+        sel?.env ?? null,
       );
       setActive(sessionId);
       navigate(`/console/${sessionId}`);
@@ -120,6 +122,12 @@ export default function AgentRegistry() {
                     ) : (
                       <div>
                         <span className="text-gray-500">dir:</span> {sel.workingDir}
+                      </div>
+                    )}
+                    {sel.env && (
+                      <div>
+                        <span className="text-gray-500">.env:</span>{" "}
+                        {sel.env.split("\n").filter((l) => l.trim()).length} line(s)
                       </div>
                     )}
                   </div>

@@ -23,6 +23,9 @@ class CreateSessionRequest(BaseModel):
     # When set, the server copies template_dir -> working_dir before starting
     # the adapter. working_dir must not already exist in that case.
     template_dir: str | None = None
+    # Optional .env contents written into working_dir after the template copy
+    # (so it overrides any template-provided .env). Requires working_dir.
+    env: str | None = None
 
 
 class PostMessageRequest(BaseModel):
@@ -68,6 +71,20 @@ async def create_session(
             raise HTTPException(status_code=500, detail=f"copy failed: {e}")
         working_dir = str(dst.resolve())
         logger.info("copied template %s -> %s", src, working_dir)
+
+    if body.env is not None:
+        if not working_dir:
+            raise HTTPException(
+                status_code=400,
+                detail="working_dir is required when env is set (it is the file destination)",
+            )
+        env_path = Path(working_dir) / ".env"
+        try:
+            env_path.write_text(body.env, encoding="utf-8")
+        except OSError as e:
+            logger.exception("failed to write .env to %s", env_path)
+            raise HTTPException(status_code=500, detail=f"write .env failed: {e}")
+        logger.info("wrote .env to %s (%d bytes)", env_path, len(body.env))
 
     session = await db.create_session(body.agent_id, working_dir=working_dir)
     logger.debug("session created id=%s status=%s", session.id, session.status)

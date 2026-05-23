@@ -18,6 +18,7 @@ interface Store {
     agentId: string,
     workingDir?: string | null,
     templateDir?: string | null,
+    env?: string | null,
   ) => Promise<string>;
   sendMessage: (sessionId: string, content: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
@@ -30,8 +31,8 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveSession: (id) => set({ activeSessionId: id }),
 
-  launchSession: async (agentId, workingDir = null, templateDir = null) => {
-    const session = await api.sessions.create(agentId, workingDir, templateDir);
+  launchSession: async (agentId, workingDir = null, templateDir = null, env = null) => {
+    const session = await api.sessions.create(agentId, workingDir, templateDir, env);
     const socket = createSessionSocket(session.id);
 
     set((s) => ({

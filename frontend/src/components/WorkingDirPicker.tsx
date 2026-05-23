@@ -7,7 +7,11 @@ type Mode = "existing" | "template";
 interface Props {
   open: boolean;
   onClose: () => void;
-  onConfirm: (value: { workingDir: string; templateDir: string | null }) => void;
+  onConfirm: (value: {
+    workingDir: string;
+    templateDir: string | null;
+    env: string | null;
+  }) => void;
 }
 
 interface BrowserState {
@@ -106,6 +110,7 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
   const [selectedExisting, setSelectedExisting] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [targetDir, setTargetDir] = useState("");
+  const [envText, setEnvText] = useState("");
 
   const existing = useBrowser("browse", open && mode === "existing");
   const templates = useBrowser("templates", open && mode === "template");
@@ -115,6 +120,7 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
       setSelectedExisting(null);
       setSelectedTemplate(null);
       setTargetDir("");
+      setEnvText("");
       setMode("existing");
     }
   }, [open]);
@@ -127,13 +133,14 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
       : !!selectedTemplate && targetDir.trim().length > 0;
 
   const handleConfirm = () => {
+    const env = envText.trim() ? envText : null;
     if (mode === "existing") {
       const dir = selectedExisting ?? existing.data?.path ?? "";
       if (!dir) return;
-      onConfirm({ workingDir: dir, templateDir: null });
+      onConfirm({ workingDir: dir, templateDir: null, env });
     } else {
       if (!selectedTemplate || !targetDir.trim()) return;
-      onConfirm({ workingDir: targetDir.trim(), templateDir: selectedTemplate });
+      onConfirm({ workingDir: targetDir.trim(), templateDir: selectedTemplate, env });
     }
   };
 
@@ -219,6 +226,18 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
               </label>
             </>
           )}
+
+          <label className="text-xs text-gray-400 flex flex-col gap-1">
+            <span>
+              .env (optional) — written into the working directory after the template copy
+            </span>
+            <textarea
+              className="bg-gray-950 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200 placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none h-20"
+              placeholder={`GATEWAY_URL=http://localhost:12598\nWIKI_SESSION_ID=<uuid>`}
+              value={envText}
+              onChange={(e) => setEnvText(e.target.value)}
+            />
+          </label>
         </div>
 
         <div className="px-5 py-3 border-t border-gray-700 flex justify-end gap-2">

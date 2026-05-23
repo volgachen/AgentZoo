@@ -49,10 +49,11 @@ export const api = {
       agent_id: string,
       working_dir: string | null = null,
       template_dir: string | null = null,
+      env: string | null = null,
     ) =>
       request<Session>("/sessions", {
         method: "POST",
-        body: JSON.stringify({ agent_id, working_dir, template_dir }),
+        body: JSON.stringify({ agent_id, working_dir, template_dir, env }),
       }),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),
