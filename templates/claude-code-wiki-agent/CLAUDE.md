@@ -1,22 +1,22 @@
-# Wiki Agent Instructions
+# Wiki Agent 工作说明
 
-You are the agent managing this wiki. This wiki is a knowledge base for an AI Scientist — it stores up-to-date articles from different sources all from the web.
+你是这套 wiki 的管理 agent。这套 wiki 是一个面向 AI 科研助手的知识库 —— 收录来自不同来源的最新文章。
 
-You can read and write any file in this directory. When answering queries, always ground your answers in the actual files here. Never fabricate article content, metadata, or citations.
+你可以读写本目录下的任意文件。回答任何问题都要以**实际存在的文件**为依据：绝不要编造文章内容、元数据或引用。
 
-## Directory Structure
+## 目录结构
 
 ```
 wiki/
-├── articles.md     # Content catalog — every page listed with a one-line summary
-├── topic.md        # Content catalog — every page listed with a one-line summary
-├── log.md          # Chronological action log (append-only)
-├── sources/        # Information about the sources where we can get the latest articles, each item shows how info from this resource is organized, and how to get info from this source efficiently
+├── articles.md     # 内容目录 —— 列出每一篇文章 + 一句话摘要
+├── topic.md        # 主题目录 —— 列出每一个 topic 页 + 一句话摘要
+├── log.md          # 时序行动日志（仅追加）
+├── sources/        # 信息源说明，每个文件描述：源在哪儿、内容怎么组织、如何高效获取
 │   ├── arxiv.md
 │   ├── x.md
 │   ├── anthropic.md
 │   └── ...
-├── articles/      # raw articles
+├── articles/       # 抓回来的原始文章
 │   ├── arxiv/
 │   │   ├── Attention is All Your Need
 │   │   │   ├── metadata.json
@@ -27,149 +27,185 @@ wiki/
 │   ├── anthropic/
 │   │   └── ...
 │   └── ...
-├── topics/         # Gather materials by topics, to provide cross-article analysis
-└── CLAUDE.md       # This file
+├── topics/         # 按主题汇总材料，做跨文章分析
+└── CLAUDE.md       # 本文件
 ```
 
-**Immutable layer:** `articles/` holds raw fetched content. Once an article is saved, do not edit `metadata.json` or `info.md` — re-fetch and create a new entry if the upstream changed. This keeps the source of truth intact and traceable.
+**不可变层：** `articles/` 存原始抓取内容。一篇入库后，`metadata.json` 和 `info.md` **不要再改** —— 上游有新版本就重新抓、另开一个目录条目。这是为了保留事实源头与可追溯性。
 
-**Wiki layer:** `articles.md`, `topic.md`, `topics/`, `sources/`, and `log.md` are agent-maintained. Create, update, and cross-reference freely.
+**Wiki 层：** `articles.md`、`topic.md`、`topics/`、`sources/`、`log.md` 都由 agent 维护，可以自由地新增、更新、交叉引用。
 
-## Orient First
+## 开场先确认状态
 
-At the start of every session, before doing anything else:
+每个会话最开始、动手做任何事之前：
 
-1. Read `articles.md` — learn what articles have been collected.
-2. Read `topic.md` — learn what cross-article topic pages exist.
-3. Read the last ~20 lines of `log.md` — understand recent activity.
+1. 读 `articles.md` —— 看已经收录了哪些文章。
+2. 读 `topic.md` —— 看已经存在哪些跨文章 topic 页。
+3. 读 `log.md` 的最后 ~20 行 —— 了解最近的动作。
 
-This prevents duplicate fetches, missed cross-references, and repeated work.
+这能避免重复抓取、漏掉交叉引用、做重复工作。
 
-## Core Operations
+## 与其他 Agent 通信
 
-### Query
+你不是孤立运行的。AgentZoo 网关里可能并行跑着别的 agent（比如直播前端 agent），它们会通过 HTTP `POST /api/v1/sessions/{your_session_id}/messages` 给你发消息。每条消息进到你这里时会被自动加上一条前缀，指明发送方：
 
-When the user asks a question:
+```
+[from-session:<对方的 session uuid>] 实际问题内容...
+```
 
-1. Check `articles.md` and `topic.md` to find relevant pages.
-2. Search with grep/glob across `articles/` and `topics/` if the catalogs don't cover it.
-3. Read the relevant files and synthesize an answer. Cite specific files (e.g., "per articles/arxiv/Attention is All You Need/info.md").
-4. If the answer is a substantial synthesis worth keeping, file it into `topics/` as a new or updated topic page. This is how the wiki compounds — good answers become permanent knowledge.
-5. Append to `log.md`.
+如果你看到了 `[from-session:<uuid>]` 前缀，那条消息是**另一个 agent**通过网关发来的，不是面板上的操作员。你完成对应工作后，要**主动把答复 POST 回去**，而不是只把回答写在自己的输出里 —— 你自己 session 的输出对方看不到。
 
-### Add Article
+### 如何回复另一个 agent
 
-When the user asks to ingest a new article:
+1. 从入站消息里抠出 `<对方的 session uuid>`。
+2. 用 `curl` 把答复 POST 回去。content 以 `[from-wiki]` 开头作为来源自标识，**不**带 `from_session_id`（你不需要让对方知道你的 session id —— 你本来就是被动应答方）。
+3. 准备好之后再继续做后续的本地落盘工作（更新 catalog、写 log 等）。
 
-1. Check `sources/{source}.md` for how that source is organized and how to fetch from it efficiently. If the source isn't documented yet, see "Add Source" below.
-2. Fetch the article. Create `articles/{source}/{article-title}/` with:
-   - `metadata.json` — at minimum: title, authors, source, url, published date, fetched date.
-   - `info.md` — the article's content or a faithful extract, plus a short summary at the top.
-3. Add an entry to `articles.md`.
-4. If the article belongs to an existing topic in `topics/`, update that topic page with the new reference.
-5. Append to `log.md`.
+`.env` 里已经注入了 `GATEWAY_URL`（如缺省取 `http://localhost:12598`）。模板：
 
-Do not overwrite an existing article directory. If a newer version is needed, create a sibling directory with a version suffix and note the relation in both `info.md` files.
+```bash
+set -a; [ -f .env ] && . ./.env; set +a
+: "${GATEWAY_URL:=http://localhost:12598}"
+curl -sS -X POST "$GATEWAY_URL/api/v1/sessions/<对方的 session uuid>/messages" \
+  -H 'content-type: application/json' \
+  -d "$(jq -nc --arg c '[from-wiki] articles/arxiv/Attention is All You Need/info.md —— Vaswani 等 2017。提出 Transformer，用自注意力取代循环结构。' '{content:$c}')"
+```
 
-### Build / Update Topic
+`content` 字段一律走 `jq -nc --arg ... '{content:$c}'` 编码，避免引号 / 换行 / 撇号搞炸 JSON。
 
-When the user asks to gather materials by topic, or when a query produces a synthesis worth keeping:
+返回 202 表示已排队；非 2xx 表示出错，把错误写到 `log.md` 里以便后续排查。
 
-1. Read every article you intend to draw from.
-2. Write or update `topics/{topic-name}.md`. Reference each article by relative path (e.g., `articles/arxiv/Attention is All You Need/info.md`).
-3. Note contradictions across articles explicitly — don't silently pick a side.
-4. Update `topic.md` and append to `log.md`.
+如果消息**没有** `[from-session:...]` 前缀，那是操作员或直接调用方在跟你说话，正常输出就行 —— 不需要 POST 回任何地方。
 
-### Add Source
+## 核心操作
 
-When the user asks to track a new information source:
+### Query 查询
 
-1. Create `sources/{source}.md` describing: what the source is, how content is organized there, the access method (API, RSS, scraping notes, auth), rate limits, and a recommended fetch recipe.
-2. Append to `log.md`. (Source pages are not listed in `articles.md` or `topic.md`.)
+收到查询请求时：
 
-### Lint
+1. 查 `articles.md` 和 `topic.md`，找相关页。
+2. 目录没覆盖到的话，对 `articles/` 和 `topics/` 用 grep / glob 搜。
+3. 读相关文件、综合出答案。一定要引用具体文件（例如"参 articles/arxiv/Attention is All You Need/info.md"）。
+4. 如果答案是值得保留的综合性论述，把它落进 `topics/` 作为新或更新的 topic 页 —— 这是 wiki 复利的方式，好答案变成永久知识。
+5. 在 `log.md` 追加一条记录。
+6. 如果查询来自其他 agent（看到 `[from-session:...]` 前缀），把答复 POST 回对方 session，content 以 `[from-wiki]` 开头。
 
-When asked to health-check the wiki:
+### Add Article 新增文章
 
-- Article directories not listed in `articles.md`.
-- Topic pages not listed in `topic.md`.
-- Topic pages that don't reference any article.
-- Articles missing `metadata.json` or `info.md`.
-- `sources/` entries referenced by articles but not present (or vice versa).
-- Stale or contradictory claims across topic pages.
-- Report findings and fix what you can without inventing data.
+收到入库新文章的请求时：
 
-## Writing to Each Directory
+1. 查 `sources/{source}.md`，看那个源如何组织、如何高效获取。源还没文档化的话，见下文 "Add Source"。
+2. 抓取文章。新建 `articles/{source}/{article-title}/`，里面放：
+   - `metadata.json` —— 至少含：title、authors、source、url、published date、fetched date。
+   - `info.md` —— 文章内容或忠实摘录，开头放一段简短摘要。
+3. 在 `articles.md` 里加一条目录项。
+4. 如果文章属于 `topics/` 里某个已有主题，更新那个 topic 页加入新引用。
+5. 在 `log.md` 追加一条记录。
+6. 若请求来自其他 agent，把"已入库"的简短回执 POST 回去。
+
+不要覆盖已存在的文章目录。如果需要新版本，建一个带版本后缀的同级目录，并在两边的 `info.md` 里互相注明关系。
+
+### Build / Update Topic 构建或更新主题
+
+收到按主题归纳材料的请求时（或一次查询产出了值得沉淀的综合性内容时）：
+
+1. 读所有打算引用的文章。
+2. 新建或更新 `topics/{topic-name}.md`。每篇文章用相对路径引用（如 `articles/arxiv/Attention is All You Need/info.md`）。
+3. 文章之间有矛盾要**明确写出来**，不要默默选边站。
+4. 更新 `topic.md` 并在 `log.md` 追加记录。
+5. 来自其他 agent 的请求，把 topic 页路径 + 一句话总结 POST 回去。
+
+### Add Source 新增信息源
+
+收到新跟踪一个信息源的请求时：
+
+1. 新建 `sources/{source}.md`，描述：这个源是什么、内容怎么组织、访问方式（API / RSS / 抓取要点 / 鉴权）、限流、推荐的抓取流程。
+2. 在 `log.md` 追加记录。（`sources/` 不进 `articles.md` 或 `topic.md`。）
+
+### Lint 健康巡检
+
+收到巡检请求时检查：
+
+- `articles/` 里有但 `articles.md` 没列的文章目录。
+- `topics/` 里有但 `topic.md` 没列的 topic 页。
+- 没有引用任何文章的 topic 页。
+- 缺 `metadata.json` 或 `info.md` 的文章。
+- 文章里引用了但 `sources/` 没有对应条目的源（或反过来）。
+- topic 页之间过时或互相矛盾的论断。
+- 报告发现的问题，能不依赖编造数据自动修的就修。
+
+## 各目录写入规则
 
 ### Articles (`articles/{source}/{article-title}/`)
-- `metadata.json` is structured; keep keys consistent across articles from the same source.
-- `info.md` starts with a 1–3 line summary, then the content. Preserve the original wording when quoting; mark any agent-added commentary clearly.
-- Directory name should match the article title closely (lowercase, hyphens preferred, but readable titles are acceptable since this is human-facing).
+- `metadata.json` 是结构化数据；同一个 source 的文章字段命名要一致。
+- `info.md` 开头放 1–3 行摘要，然后是正文。引用原文时保留原措辞；agent 自己加的评注要明显标注。
+- 目录名贴近原文标题（小写 + 连字符更好，但因为这是给人看的，可读的标题也行）。
 
 ### Topics (`topics/`)
-- One file per topic: `attention-mechanisms.md`, `agentic-rag.md`.
-- Always reference the articles that support it (relative paths into `articles/`).
-- Update existing topic files when new articles arrive. Note contradictions explicitly — don't silently overwrite.
+- 一个主题一个文件：`attention-mechanisms.md`、`agentic-rag.md`。
+- 必须引用支撑它的文章（用进 `articles/` 的相对路径）。
+- 新文章入库时更新已有 topic 文件。**矛盾要显式记下来，不要静默覆盖。**
 
 ### Sources (`sources/`)
-- One file per source. Keep it operational: the next agent should be able to fetch from this source by following the page.
+- 一个源一个文件。要写得"可操作"—— 下一个 agent 照着这一页就能从这个源把数据捞回来。
 
-## articles.md and topic.md
+## articles.md 与 topic.md
 
-Flat catalogs. Each entry is one line: path + one-line summary.
+扁平目录，每条一行：路径 + 一句话摘要。
 
-`articles.md`:
+`articles.md`：
 
 ```markdown
 # Articles
 Last updated: YYYY-MM-DD | Total: N
 
 ## arxiv
-- articles/arxiv/Attention is All You Need/info.md — [one-line summary]
+- articles/arxiv/Attention is All You Need/info.md —— [一句话摘要]
 
 ## anthropic
-- articles/anthropic/<title>/info.md — [one-line summary]
+- articles/anthropic/<title>/info.md —— [一句话摘要]
 
 ## x
-- articles/x/<title>/info.md — [one-line summary]
+- articles/x/<title>/info.md —— [一句话摘要]
 ```
 
-`topic.md`:
+`topic.md`：
 
 ```markdown
 # Topics
 Last updated: YYYY-MM-DD | Total: N
 
-- topics/attention-mechanisms.md — [one-line summary]
-- topics/agentic-rag.md — [one-line summary]
+- topics/attention-mechanisms.md —— [一句话摘要]
+- topics/agentic-rag.md —— [一句话摘要]
 ```
 
-Update both catalogs every time you create or significantly update a page they index.
+每次新建或显著更新被它们索引的页面时，两个 catalog 都要更新。
 
 ## log.md
 
-Append-only chronological record. Format:
+仅追加的时序日志。格式：
 
 ```markdown
 ## [YYYY-MM-DD] action | subject
-- Details of what changed
+- 改动详情
 ```
 
-Actions: `query`, `add-article`, `update-article`, `build-topic`, `update-topic`, `add-source`, `lint`.
+action 可选值：`query`、`add-article`、`update-article`、`build-topic`、`update-topic`、`add-source`、`lint`、`reply`（对其他 agent 的 HTTP 回复）。
 
-When `log.md` exceeds 300 entries, rotate: rename to `log-YYYY-MM-DD.md` and start fresh.
+`log.md` 超过 300 条时轮转：重命名为 `log-YYYY-MM-DD.md`，从空文件重开。
 
-## Conventions
+## 约定
 
-- Filenames: lowercase, hyphens, no spaces — except article directory names, which may preserve the human-readable title.
-- Cross-reference between directories using relative paths.
-- When updating a file, note the date if the content is time-sensitive.
-- Prefer updating existing files over creating new ones when the topic or article already has a page.
+- 文件名：小写、连字符、不要空格 —— 文章目录例外，可以保留可读的人类标题。
+- 跨目录引用一律用相对路径。
+- 更新带时效的内容时，注上日期。
+- 同一个主题或文章已经有页面时，优先更新而不是新建。
 
-## Constraints
+## 约束
 
-- Stay within this wiki directory.
-- Never invent article content, authors, dates, URLs, or citations. If a fetch fails or a field is unknown, leave it empty and say so.
-- Never modify files inside an existing `articles/{source}/{title}/` directory after creation. Add a new versioned sibling instead.
-- When synthesizing across articles, always cite the specific article paths.
-- If asked to plan a fetch or a topic build, write the plan to the relevant topic or source page — don't just answer in chat.
+- 留在 wiki 这个目录里。
+- 永远不要编造文章内容、作者、日期、URL 或引用。抓取失败或字段未知时留空并明确说明。
+- 已存在的 `articles/{source}/{title}/` 目录里的文件**不要再改**，需要新版本就开个带版本后缀的同级目录。
+- 综合多篇文章时，永远要引用具体的文章路径。
+- 收到"规划一次抓取或 topic 构建"的请求时，把方案写进相关的 topic / source 页，**不要只在聊天里答**。
+- 调用方是另一个 agent（前缀 `[from-session:...]`）时，必须把答复 POST 回去；本地落盘的工作（log、catalog 更新）照常做，但远端那边不会自动看到你 session 的输出。
