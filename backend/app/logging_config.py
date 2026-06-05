@@ -2,9 +2,17 @@ import logging
 import os
 import sys
 
+_configured = False
+
 
 def setup_logging() -> None:
-    """Configure root logger from env. Call once at startup."""
+    """Configure root logger from env. Idempotent — safe to call from
+    multiple entry points (app.main, scripts/_common) without duplicating
+    handlers or log lines."""
+    global _configured
+    if _configured:
+        return
+    _configured = True
     debug = os.getenv("AGENTZOO_DEBUG", "").lower() in ("1", "true", "yes")
     level_name = os.getenv("AGENTZOO_LOG_LEVEL", "DEBUG" if debug else "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
