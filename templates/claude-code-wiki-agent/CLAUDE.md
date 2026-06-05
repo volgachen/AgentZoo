@@ -77,6 +77,37 @@ curl -sS -X POST "$GATEWAY_URL/api/v1/sessions/<对方的 session uuid>/messages
 
 如果消息**没有** `[from-session:...]` 前缀，那是操作员或直接调用方在跟你说话，正常输出就行 —— 不需要 POST 回任何地方。
 
+## 抓网页
+
+本地有个浏览器服务：`http://localhost:18001/fetch`。它在后台跑一个真实 Edge 浏览器（带已登录的用户档案、JS 已执行、动态内容已渲染），返回的是经 LLM 整理过的 markdown 摘要，**不是**原始 HTML。任何需要从 URL 抓取内容的场景都走这个服务。
+
+**为什么不用 `curl` / `WebFetch`：** 这个服务能处理 JS 渲染页面、能利用浏览器 profile 里已登录的 cookie 访问需要登录的站点，返回的内容已经去掉了导航 / 广告 / 页脚等样板。
+
+### 用法
+
+```bash
+curl -sS -X POST http://localhost:18001/fetch \
+  -H 'content-type: application/json' \
+  -d '{"url": "https://example.com/article", "wait_time": 3}'
+```
+
+请求字段：
+- `url`（必填）—— 要抓的页面。
+- `wait_time`（默认 3）—— 页面加载完后再等几秒让 JS 稳定。重 SPA 站点调到 5–10。
+- `timeout`（默认 30）—— 页面加载超时（秒）。
+- `summarize`（默认 `true`）—— 设为 `false` 时返回原始提取文本，**不**做 LLM 摘要。需要保留原文措辞（比如写 `info.md` 的正文）时用 `false`。
+- `instructions`（可选）—— 给摘要器的额外指引，例如 `"提取摘要、作者、核心论点、以及被引用的相关前作。"`
+
+响应形如 `{url, title, extracted_chars, summary}`；`summarize: false` 时 `summary` 换成 `text`。
+
+### 什么时候调
+
+- **Add Article：** 用 `summarize: false` 抓一次拿到忠实文本放进 `info.md` 正文；可选再用 `summarize: true` + 针对性 `instructions` 生成开头的摘要段。title 以及能从内容里看到的作者 / 日期等元数据填进 `metadata.json`。
+- **Add Source：** 给新源写说明文档前，先用 `summarize: false` 抓一个代表性 URL 看看页面真实结构，再写抓取流程。
+- **Query：** 查询里出现了 wiki 里还没有的 URL，先抓一遍再答；但只在用户明确要求或确实值得保留时才入库为 article。
+
+服务连不上（connection refused）时，**直接告诉用户本地浏览器后端没在跑**，不要悄悄回退到 `WebFetch` —— wiki 的抓取来源可追溯性很重要。
+
 ## 核心操作
 
 ### Query 查询
