@@ -66,6 +66,9 @@ class MockMemoryDatabase(IAgentDatabase):
             raise KeyError(f"Session '{session_id}' not found")
         return session
 
+    async def list_sessions(self) -> List[Session]:
+        return list(self._sessions.values())
+
     async def update_session_status(self, session_id: str, status: SessionStatus) -> Session:
         session = await self.get_session(session_id)
         session.status = status

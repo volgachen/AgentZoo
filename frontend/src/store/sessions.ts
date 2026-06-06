@@ -14,6 +14,7 @@ interface Store {
   activeSessionId: string | null;
 
   setActiveSession: (id: string | null) => void;
+  hydrateSessions: () => Promise<void>;
   launchSession: (
     agentId: string,
     workingDir?: string | null,
@@ -30,6 +31,25 @@ export const useStore = create<Store>((set, get) => ({
   activeSessionId: null,
 
   setActiveSession: (id) => set({ activeSessionId: id }),
+
+  // Pull every session the gateway knows about and merge any we don't already
+  // track into the store as display-only entries (no live socket). Sessions we
+  // launched in this tab keep their socket/events untouched; we only refresh
+  // their session metadata. Lets the dashboard show the full derivation tree
+  // even across a page reload.
+  hydrateSessions: async () => {
+    const remote = await api.sessions.list();
+    set((s) => {
+      const next = { ...s.sessions };
+      for (const session of remote) {
+        const existing = next[session.id];
+        next[session.id] = existing
+          ? { ...existing, session }
+          : { session, events: [], socket: null, generating: false };
+      }
+      return { sessions: next };
+    });
+  },
 
   launchSession: async (agentId, workingDir = null, templateDir = null, env = null) => {
     const session = await api.sessions.create(agentId, workingDir, templateDir, env);

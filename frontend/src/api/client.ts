@@ -56,6 +56,7 @@ export const api = {
         body: JSON.stringify({ agent_id, working_dir, template_dir, env }),
       }),
     get: (id: string) => request<Session>(`/sessions/${id}`),
+    list: () => request<Session[]>("/sessions"),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),
     delete: (id: string) =>
       request<void>(`/sessions/${id}`, { method: "DELETE" }),

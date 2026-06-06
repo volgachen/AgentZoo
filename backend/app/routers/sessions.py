@@ -156,6 +156,11 @@ async def create_session(
     return await db.get_session(session.id)
 
 
+@router.get("", response_model=list[Session])
+async def list_sessions(db: IAgentDatabase = Depends(get_db)):
+    return await db.list_sessions()
+
+
 @router.get("/{session_id}", response_model=Session)
 async def get_session(session_id: str, db: IAgentDatabase = Depends(get_db)):
     try:

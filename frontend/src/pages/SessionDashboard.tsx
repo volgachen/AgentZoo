@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import { useStore } from "../store/sessions";
 import type { Session, SessionStatus, StreamEvent } from "../api/types";
 
@@ -70,7 +71,14 @@ export default function SessionDashboard() {
   const sessions = useStore((s) => s.sessions);
   const setActive = useStore((s) => s.setActiveSession);
   const closeSession = useStore((s) => s.closeSession);
+  const hydrateSessions = useStore((s) => s.hydrateSessions);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    hydrateSessions().catch((err) =>
+      console.error("failed to hydrate sessions", err),
+    );
+  }, [hydrateSessions]);
 
   const entries = Object.values(sessions);
 

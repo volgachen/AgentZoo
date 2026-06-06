@@ -26,6 +26,9 @@ class IAgentDatabase(ABC):
     async def get_session(self, session_id: str) -> Session: pass
 
     @abstractmethod
+    async def list_sessions(self) -> List[Session]: pass
+
+    @abstractmethod
     async def update_session_status(self, session_id: str, status: SessionStatus) -> Session: pass
 
     @abstractmethod
