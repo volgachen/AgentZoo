@@ -26,6 +26,10 @@ class CreateSessionRequest(BaseModel):
     # Optional .env contents written into working_dir after the template copy
     # (so it overrides any template-provided .env). Requires working_dir.
     env: str | None = None
+    # Session that is spawning this one (the caller's own session id). Recorded
+    # on the new Session and injected into its .env as PARENT_SESSION_ID so the
+    # child can report results back to its parent.
+    parent_session_id: str | None = None
 
 
 class PostMessageRequest(BaseModel):
@@ -40,14 +44,24 @@ async def create_session(
     registry: AdapterRegistry = Depends(get_registry),
 ):
     logger.info(
-        "create_session agent=%s working_dir=%s template_dir=%s",
-        body.agent_id, body.working_dir, body.template_dir,
+        "create_session agent=%s working_dir=%s template_dir=%s parent=%s",
+        body.agent_id, body.working_dir, body.template_dir, body.parent_session_id,
     )
     try:
         agent = await db.get_agent(body.agent_id)
     except KeyError as e:
         logger.warning("create_session: agent not found: %s", body.agent_id)
         raise HTTPException(status_code=404, detail=str(e))
+
+    if body.parent_session_id is not None:
+        try:
+            await db.get_session(body.parent_session_id)
+        except KeyError:
+            logger.warning("create_session: parent session not found: %s", body.parent_session_id)
+            raise HTTPException(
+                status_code=404,
+                detail=f"parent_session_id '{body.parent_session_id}' not found",
+            )
 
     working_dir = body.working_dir
     if body.template_dir:
@@ -79,17 +93,24 @@ async def create_session(
             detail="working_dir is required when env is set (it is the file destination)",
         )
 
-    session = await db.create_session(body.agent_id, working_dir=working_dir)
+    session = await db.create_session(
+        body.agent_id,
+        working_dir=working_dir,
+        parent_session_id=body.parent_session_id,
+    )
     logger.debug("session created id=%s status=%s", session.id, session.status)
 
     # Write .env into working_dir if we have one. Always include MY_SESSION_ID
     # so the agent can address itself when calling other sessions via the
-    # gateway. Operator-supplied env content goes first; the injected line
-    # follows so it wins on duplicate keys when sourced with `set -a`.
+    # gateway, and PARENT_SESSION_ID (when spawned by another session) so it can
+    # report back. Operator-supplied env content goes first; the injected lines
+    # follow so they win on duplicate keys when sourced with `set -a`.
     if working_dir:
         env_lines: list[str] = []
         if body.env is not None:
             env_lines.append(body.env if body.env.endswith("\n") else body.env + "\n")
+        if session.parent_session_id is not None:
+            env_lines.append(f"PARENT_SESSION_ID={session.parent_session_id}\n")
         env_lines.append(f"MY_SESSION_ID={session.id}\n")
         env_path = Path(working_dir) / ".env"
         try:

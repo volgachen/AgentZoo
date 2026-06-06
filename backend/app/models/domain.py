@@ -42,6 +42,10 @@ class Session(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     agent_id: str
     working_dir: Optional[str] = None
+    # Session that spawned this one via POST /sessions, if any. None means the
+    # session was created directly by an operator. Used to render the agent
+    # derivation tree and to let the child report results back to its parent.
+    parent_session_id: Optional[str] = None
     status: SessionStatus = SessionStatus.INITIALIZING
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

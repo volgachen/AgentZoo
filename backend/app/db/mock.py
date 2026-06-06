@@ -43,9 +43,19 @@ class MockMemoryDatabase(IAgentDatabase):
             raise KeyError(f"Agent '{agent_id}' not found")
         return agent
 
-    async def create_session(self, agent_id: str, working_dir: str | None = None) -> Session:
+    async def create_session(
+        self,
+        agent_id: str,
+        working_dir: str | None = None,
+        *,
+        parent_session_id: str | None = None,
+    ) -> Session:
         await self.get_agent(agent_id)  # validate agent exists
-        session = Session(agent_id=agent_id, working_dir=working_dir)
+        session = Session(
+            agent_id=agent_id,
+            working_dir=working_dir,
+            parent_session_id=parent_session_id,
+        )
         self._sessions[session.id] = session
         self._messages[session.id] = []
         return session

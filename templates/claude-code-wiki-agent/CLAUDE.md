@@ -77,6 +77,54 @@ curl -sS -X POST "$GATEWAY_URL/api/v1/sessions/<对方的 session uuid>/messages
 
 如果消息**没有** `[from-session:...]` 前缀，那是操作员或直接调用方在跟你说话，正常输出就行 —— 不需要 POST 回任何地方。
 
+## 启动新 Session
+
+如果你认为有一些事情有一定复杂性，需要查网页、多次交互，而你只关心任务交付的结果，并不关心任务执行的过程。那么，你可以启动一个 subagent，将任务交给他执行，然后让他通知你执行完成即可。
+
+当你需要启动 subagent 时，你通过网关操作即可，端点是 `POST /api/v1/sessions`，返回 201 + 完整 Session 对象，里面的 `id` 就是新 session 的 uuid。
+
+请求体字段：
+
+- `agent_id`（必填）—— 用哪个 agent 模板。种子里有 `agent-claude-code-001`（Claude Code）和 `agent-research-001`（OpenAI 工具调用）。
+- `working_dir`（可选）—— adapter 的工作目录。设了 `template_dir` 或 `env` 时变成**必填**。
+- `template_dir`（可选）—— 设了的话，服务端先把它整目录拷到 `working_dir` 再启动。**`working_dir` 必须还不存在**，否则返回 409。每跑一个新实例就指向一个全新的 `working_dir`，别复用。
+- `env`（可选）—— 写进 `working_dir/.env` 的内容；服务端会自动追加一行 `MY_SESSION_ID=<新 session id>`，所以新 agent 能自己定位自己。
+- `parent_session_id`（可选）—— 派生它的父 session id，**填你自己的 `$MY_SESSION_ID`**。服务端会把父子关系记到新 Session 上（面板可画派生树），并往子 `.env` 注入一行 `PARENT_SESSION_ID=<你的 id>`，这样 subagent 干完活知道该回报给谁。既然你派 subagent 就是为了"只等结果通知"，这个字段基本每次都要带上。
+
+### 模板：克隆一个 wiki agent 出来并派活
+
+```bash
+set -a; [ -f .env ] && . ./.env; set +a
+: "${GATEWAY_URL:=http://localhost:12598}"
+
+# 1) 建 session：用 claude-code 模板，把 wiki 模板目录拷进一个全新工作目录
+RESP=$(curl -sS -X POST "$GATEWAY_URL/api/v1/sessions" \
+  -H 'content-type: application/json' \
+  -d "$(jq -nc \
+        --arg agent  agent-claude-code-001 \
+        --arg wd     /abs/path/to/runs/wiki-run-01 \
+        --arg tpl    /abs/path/to/templates/claude-code-wiki-agent \
+        --arg env    'GATEWAY_URL=http://localhost:12598' \
+        --arg parent "$MY_SESSION_ID" \
+        '{agent_id:$agent, working_dir:$wd, template_dir:$tpl, env:$env, parent_session_id:$parent}')")
+
+# 2) 抠出新 session 的 id
+NEW_ID=$(printf '%s' "$RESP" | jq -r '.id')
+
+# 3) 给它派第一条任务
+curl -sS -X POST "$GATEWAY_URL/api/v1/sessions/$NEW_ID/messages" \
+  -H 'content-type: application/json' \
+  -d "$(jq -nc --arg c '把 arxiv 上最新的 agentic RAG 论文入库' '{content:$c}')"
+```
+
+想直接用现成目录、不拷模板时，只传 `working_dir`、不传 `template_dir` 即可。
+
+拿到 `NEW_ID` 后，你既可以继续 `POST .../messages` 给它派活，也可以把它当成一个对端：发消息时带上 `from_session_id`（见上一节），对方收到的就是 `[from-session:<你的 id>]` 前缀那套协议。subagent 干完会主动把成果 POST 回你（因为它读到了 `PARENT_SESSION_ID`），你到时按 `[from-session:...]` 前缀那套接收即可。
+
+**反过来——当你自己是被派生出来的 subagent 时**：开场读 `.env`，若存在 `PARENT_SESSION_ID`，说明你是被另一个 session 拉起来的。干完活要主动把成果 POST 回 `PARENT_SESSION_ID`（content 以 `[from-wiki]` 开头），用法同"如何回复另一个 agent"那节。
+
+失败码：404 = `agent_id` 或 `parent_session_id` 不存在；400 = 设了 `template_dir`/`env` 却没给 `working_dir`；409 = `working_dir` 已存在；500 = 拷贝或写 `.env` 失败。出错时把响应写进 `log.md`（action 用 `spawn`）以便排查。
+
 ## 抓网页
 
 本地有个浏览器服务：`http://localhost:18001/fetch`。它在后台跑一个真实 Edge 浏览器（带已登录的用户档案、JS 已执行、动态内容已渲染），返回的是经 LLM 整理过的 markdown 摘要，**不是**原始 HTML。任何需要从 URL 抓取内容的场景都走这个服务。
@@ -221,7 +269,7 @@ Last updated: YYYY-MM-DD | Total: N
 - 改动详情
 ```
 
-action 可选值：`query`、`add-article`、`update-article`、`build-topic`、`update-topic`、`add-source`、`lint`、`reply`（对其他 agent 的 HTTP 回复）。
+action 可选值：`query`、`add-article`、`update-article`、`build-topic`、`update-topic`、`add-source`、`lint`、`reply`（对其他 agent 的 HTTP 回复）、`spawn`（通过网关新建 session）。
 
 `log.md` 超过 300 条时轮转：重命名为 `log-YYYY-MM-DD.md`，从空文件重开。
 

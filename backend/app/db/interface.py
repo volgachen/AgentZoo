@@ -14,7 +14,13 @@ class IAgentDatabase(ABC):
     async def get_agent(self, agent_id: str) -> AgentTemplate: pass
 
     @abstractmethod
-    async def create_session(self, agent_id: str, working_dir: str | None = None) -> Session: pass
+    async def create_session(
+        self,
+        agent_id: str,
+        working_dir: str | None = None,
+        *,
+        parent_session_id: str | None = None,
+    ) -> Session: pass
 
     @abstractmethod
     async def get_session(self, session_id: str) -> Session: pass
