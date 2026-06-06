@@ -43,6 +43,40 @@ class MockMemoryDatabase(IAgentDatabase):
             raise KeyError(f"Agent '{agent_id}' not found")
         return agent
 
+    async def create_agent(self, template: AgentTemplate) -> AgentTemplate:
+        self._agents[template.id] = template
+        return template
+
+    async def update_agent(
+        self,
+        agent_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        system_prompt: str | None = None,
+        tool_names: list[str] | None = None,
+        openai_model: str | None = None,
+        openai_base_url: str | None = None,
+    ) -> AgentTemplate:
+        agent = await self.get_agent(agent_id)
+        if name is not None:
+            agent.name = name
+        if description is not None:
+            agent.description = description
+        if system_prompt is not None:
+            agent.system_prompt = system_prompt
+        if tool_names is not None:
+            agent.tool_names = tool_names
+        if openai_model is not None:
+            agent.openai_model = openai_model
+        if openai_base_url is not None:
+            agent.openai_base_url = openai_base_url
+        return agent
+
+    async def delete_agent(self, agent_id: str) -> None:
+        await self.get_agent(agent_id)
+        del self._agents[agent_id]
+
     async def create_session(
         self,
         agent_id: str,

@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { AgentTemplate } from "../api/types";
 import { useStore } from "../store/sessions";
 import WorkingDirPicker from "../components/WorkingDirPicker";
+import AgentDetailModal from "../components/AgentDetailModal";
 
 const AGENT_TYPE_LABEL: Record<string, string> = {
   tool_use: "Tool Use",
@@ -23,16 +24,33 @@ export default function AgentRegistry() {
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [dirs, setDirs] = useState<Record<string, DirSelection>>({});
   const [pickerFor, setPickerFor] = useState<string | null>(null);
+  // detail modal: undefined = closed, null = create, agent = edit
+  const [editing, setEditing] = useState<AgentTemplate | null | undefined>(undefined);
   const launchSession = useStore((s) => s.launchSession);
   const setActive = useStore((s) => s.setActiveSession);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    api.agents.list().then((data) => {
+  const reload = useCallback(() => {
+    return api.agents.list().then((data) => {
       setAgents(data);
       setLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const handleDelete = async (agentId: string) => {
+    if (!confirm("Delete this agent template?")) return;
+    setLaunchError(null);
+    try {
+      await api.agents.delete(agentId);
+      await reload();
+    } catch (e) {
+      setLaunchError((e as Error).message);
+    }
+  };
 
   const handleLaunch = async (agentId: string) => {
     setLaunching(agentId);
@@ -64,7 +82,15 @@ export default function AgentRegistry() {
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-semibold text-white mb-6">Agent Registry</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-semibold text-white">Agent Registry</h1>
+        <button
+          onClick={() => setEditing(null)}
+          className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium"
+        >
+          + New Agent
+        </button>
+      </div>
       {launchError && (
         <div className="mb-4 px-3 py-2 rounded-lg bg-red-900/40 border border-red-800 text-red-200 text-sm font-mono">
           {launchError}
@@ -85,6 +111,21 @@ export default function AgentRegistry() {
                 </span>
               </div>
               <p className="text-sm text-gray-400 flex-1">{agent.description}</p>
+
+              <div className="flex items-center gap-3 text-xs">
+                <button
+                  onClick={() => setEditing(agent)}
+                  className="text-indigo-400 hover:text-indigo-300"
+                >
+                  Edit / Details
+                </button>
+                <button
+                  onClick={() => handleDelete(agent.id)}
+                  className="text-gray-500 hover:text-red-400"
+                >
+                  Delete
+                </button>
+              </div>
 
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
@@ -153,6 +194,13 @@ export default function AgentRegistry() {
           if (pickerFor) setDirs((d) => ({ ...d, [pickerFor]: value }));
           setPickerFor(null);
         }}
+      />
+
+      <AgentDetailModal
+        open={editing !== undefined}
+        agent={editing ?? null}
+        onClose={() => setEditing(undefined)}
+        onSaved={reload}
       />
     </div>
   );

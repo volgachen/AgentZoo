@@ -14,6 +14,25 @@ class IAgentDatabase(ABC):
     async def get_agent(self, agent_id: str) -> AgentTemplate: pass
 
     @abstractmethod
+    async def create_agent(self, template: AgentTemplate) -> AgentTemplate: pass
+
+    @abstractmethod
+    async def update_agent(
+        self,
+        agent_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        system_prompt: str | None = None,
+        tool_names: list[str] | None = None,
+        openai_model: str | None = None,
+        openai_base_url: str | None = None,
+    ) -> AgentTemplate: pass
+
+    @abstractmethod
+    async def delete_agent(self, agent_id: str) -> None: pass
+
+    @abstractmethod
     async def create_session(
         self,
         agent_id: str,

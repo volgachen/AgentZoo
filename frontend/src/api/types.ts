@@ -23,6 +23,9 @@ export interface AgentTemplate {
   description: string;
   agent_type: AgentType;
   system_prompt: string;
+  tool_names: string[];
+  openai_model: string;
+  openai_base_url: string | null;
   created_at: string;
 }
 

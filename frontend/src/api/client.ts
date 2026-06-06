@@ -1,5 +1,6 @@
 import type {
   AgentTemplate,
+  AgentType,
   Session,
   Message,
   Plugin,
@@ -39,10 +40,37 @@ function browseQuery(path: string | null | undefined): string {
   return path ? `?path=${encodeURIComponent(path)}` : "";
 }
 
+export interface CreateAgentPayload {
+  name: string;
+  description: string;
+  agent_type: AgentType;
+  system_prompt: string;
+  tool_names: string[];
+  openai_model: string;
+  openai_base_url: string | null;
+}
+
+export type UpdateAgentPayload = Partial<Omit<CreateAgentPayload, "agent_type">>;
+
 export const api = {
   agents: {
     list: () => request<AgentTemplate[]>("/agents"),
     get: (id: string) => request<AgentTemplate>(`/agents/${id}`),
+    create: (body: CreateAgentPayload) =>
+      request<AgentTemplate>("/agents", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    update: (id: string, body: UpdateAgentPayload) =>
+      request<AgentTemplate>(`/agents/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) =>
+      request<void>(`/agents/${id}`, { method: "DELETE" }),
+  },
+  tools: {
+    list: () => request<string[]>("/tools"),
   },
   sessions: {
     create: (
