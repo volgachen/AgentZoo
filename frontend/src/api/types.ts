@@ -30,6 +30,7 @@ export interface Session {
   id: string;
   agent_id: string;
   working_dir: string | null;
+  parent_session_id: string | null;
   status: SessionStatus;
   created_at: string;
   updated_at: string;
