@@ -29,7 +29,7 @@ async def main() -> int:
         return 2
 
     adapter = OpenAIToolUseAdapter(
-        tool_names=["web_search", "arxiv_search"],
+        tool_names=["web_search", "arxiv_search", "bash"],
         model=os.getenv("OPENAI_MODEL", "gpt-4o"),
         base_url=os.getenv("OPENAI_BASE_URL"),
     )
