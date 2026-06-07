@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -6,9 +8,18 @@ setup_logging()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.db.deps import init_db, close_db
 from app.routers import agents, sessions, fs, plugins, tools
 
-app = FastAPI(title="Agent Gateway", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+    await close_db()
+
+
+app = FastAPI(title="Agent Gateway", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
