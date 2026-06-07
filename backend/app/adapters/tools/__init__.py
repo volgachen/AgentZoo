@@ -1,2 +1,9 @@
 # Import all tools to trigger @register_tool decoration
-from app.adapters.tools import web_search, arxiv_search, bash, read  # noqa: F401
+from app.adapters.tools import (  # noqa: F401
+    web_search,
+    arxiv_search,
+    bash,
+    read,
+    write,
+    edit,
+)

@@ -17,6 +17,12 @@ QUERIES = {
     "arxiv_search": {"query": "transformer efficiency", "max_results": 2},
     "bash": {"command": "echo hello from bash"},
     "read": {"path": "scripts/_common.py", "limit": 5},
+    "write": {"file_path": "tmp/smoke_write.txt", "content": "hello\nworld\n"},
+    "edit": {
+        "file_path": "tmp/smoke_write.txt",
+        "old_string": "world",
+        "new_string": "there",
+    },
 }
 
 
