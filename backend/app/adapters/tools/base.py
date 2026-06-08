@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 class BaseTool(ABC):
     name: str
     description: str
+    session_id: str | None = None
 
     @abstractmethod
     def parameters_schema(self) -> dict:

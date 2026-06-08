@@ -40,6 +40,8 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
             kwargs["api_key"] = api_key
         self._client = AsyncOpenAI(**kwargs)
         self._tools = load_tools(self._tool_names)
+        for t in self._tools:
+            t.session_id = self.session_id
         if system_prompt:
             self._messages = [{"role": "system", "content": system_prompt}]
         self._alive = True

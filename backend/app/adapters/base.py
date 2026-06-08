@@ -19,6 +19,8 @@ class StreamEvent(BaseModel):
 
 
 class BaseAgentAdapter(ABC):
+    session_id: str | None = None
+
     @abstractmethod
     async def start(self, system_prompt: str) -> None:
         """启动 Agent，建立底层进程或连接。"""
