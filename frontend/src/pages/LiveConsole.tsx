@@ -42,10 +42,17 @@ export default function LiveConsole() {
   const navigate = useNavigate();
   const sessions = useStore((s) => s.sessions);
   const sendMessage = useStore((s) => s.sendMessage);
+  const openSession = useStore((s) => s.openSession);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const entry = sessionId ? sessions[sessionId] : undefined;
+
+  // Backfill history + attach a live socket when viewing a session we didn't
+  // launch in this tab (e.g. subagent-spawned). No-op if already live.
+  useEffect(() => {
+    if (sessionId) openSession(sessionId);
+  }, [sessionId, openSession]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
