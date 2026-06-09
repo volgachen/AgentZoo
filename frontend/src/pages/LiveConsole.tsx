@@ -139,7 +139,9 @@ export default function LiveConsole() {
                 ? "bg-green-900 text-green-300"
                 : session.status === "ERROR"
                   ? "bg-red-900 text-red-300"
-                  : "bg-gray-700 text-gray-400"
+                  : session.status === "WAITING_USER"
+                    ? "bg-blue-900 text-blue-300"
+                    : "bg-gray-700 text-gray-400"
             }`}
           >
             {session.status}

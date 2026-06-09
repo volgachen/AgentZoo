@@ -107,6 +107,7 @@ class SessionRunner:
     async def _loop(self) -> None:
         while True:
             item = await self._inbox.get()
+            await self._db.update_session_status(self._session_id, SessionStatus.RUNNING)
             try:
                 await self._run_turn(item)
             except asyncio.CancelledError:
@@ -166,3 +167,5 @@ class SessionRunner:
             )
         if errored:
             await self._db.update_session_status(self._session_id, SessionStatus.ERROR)
+        else:
+            await self._db.update_session_status(self._session_id, SessionStatus.WAITING_USER)
