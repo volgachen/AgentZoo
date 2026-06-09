@@ -132,8 +132,13 @@ class SubagentTool(BaseTool):
         )
 
         # ---- 1) Create the session ----
+        # trust_env=False: these calls always target our own gateway on
+        # localhost, so they must bypass any HTTP(S)_PROXY / system proxy (a VPN
+        # proxy would otherwise intercept the loopback request and 502).
         try:
-            async with httpx.AsyncClient(timeout=_CREATE_SESSION_TIMEOUT) as client:
+            async with httpx.AsyncClient(
+                timeout=_CREATE_SESSION_TIMEOUT, trust_env=False
+            ) as client:
                 resp = await client.post(
                     f"{base}/api/v1/sessions",
                     headers={"content-type": "application/json"},
@@ -160,7 +165,9 @@ class SubagentTool(BaseTool):
         # ---- 2) Send the first task ----
         msg_body = {"content": task}
         try:
-            async with httpx.AsyncClient(timeout=_POST_MESSAGE_TIMEOUT) as client:
+            async with httpx.AsyncClient(
+                timeout=_POST_MESSAGE_TIMEOUT, trust_env=False
+            ) as client:
                 msg_resp = await client.post(
                     f"{base}/api/v1/sessions/{new_id}/messages",
                     headers={"content-type": "application/json"},
@@ -282,7 +289,9 @@ class SubagentTool(BaseTool):
         if not parent_session_id:
             return None
         try:
-            async with httpx.AsyncClient(timeout=_GET_SESSION_TIMEOUT) as client:
+            async with httpx.AsyncClient(
+                timeout=_GET_SESSION_TIMEOUT, trust_env=False
+            ) as client:
                 resp = await client.get(
                     f"{base}/api/v1/sessions/{parent_session_id}"
                 )
