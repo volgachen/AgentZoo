@@ -15,8 +15,10 @@ function messageToEvent(m: Message): StreamEvent {
   switch (m.role) {
     case "user":
       return { type: "user", data: m.content };
-    case "tool":
+    case "tool_call":
       return { type: "tool_call", data: m.content };
+    case "tool":
+      return { type: "tool_result", data: m.content };
     case "system":
       return { type: "status", data: m.content };
     case "agent":

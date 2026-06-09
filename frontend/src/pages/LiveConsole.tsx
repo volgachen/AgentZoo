@@ -6,6 +6,7 @@ import type { StreamEvent } from "../api/types";
 const EVENT_STYLE: Record<string, string> = {
   text: "text-gray-200",
   tool_call: "text-yellow-400",
+  tool_result: "text-amber-300",
   status: "text-blue-400",
   error: "text-red-400",
   done: "text-green-500",
@@ -14,21 +15,45 @@ const EVENT_STYLE: Record<string, string> = {
   user: "text-indigo-300",
 };
 
+// tool_call data is {name,args}; tool_result data is {name,result}. Render them
+// readably instead of dumping raw JSON.
+function formatToolData(type: string, raw: string): string {
+  try {
+    const obj = JSON.parse(raw);
+    if (type === "tool_call") {
+      return `${obj.name}(${JSON.stringify(obj.args ?? {})})`;
+    }
+    if (type === "tool_result") {
+      return `${obj.name} → ${typeof obj.result === "string" ? obj.result : JSON.stringify(obj.result)}`;
+    }
+  } catch {
+    // fall through to raw
+  }
+  return raw;
+}
+
 function EventLine({ event }: { event: StreamEvent }) {
   const style = EVENT_STYLE[event.type] ?? "text-gray-300";
   const prefix =
     event.type === "tool_call"
       ? "⚙ "
-      : event.type === "status"
-        ? "● "
-        : event.type === "error"
-          ? "✗ "
-          : event.type === "done"
-            ? "✓ "
-            : event.type === "user"
-              ? "❯ "
-              : "";
-  const body = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+      : event.type === "tool_result"
+        ? "↩ "
+        : event.type === "status"
+          ? "● "
+          : event.type === "error"
+            ? "✗ "
+            : event.type === "done"
+              ? "✓ "
+              : event.type === "user"
+                ? "❯ "
+                : "";
+  const body =
+    event.type === "tool_call" || event.type === "tool_result"
+      ? formatToolData(event.type, event.data)
+      : typeof event.data === "string"
+        ? event.data
+        : JSON.stringify(event.data);
   return (
     <div className={`font-mono text-sm whitespace-pre-wrap break-all ${style}`}>
       {prefix}

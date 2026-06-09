@@ -145,6 +145,16 @@ class SessionRunner:
                 self._broadcast(event)
                 if event.type == StreamEventType.TEXT:
                     agent_buf.append(event.data)
+                elif event.type == StreamEventType.TOOL_CALL:
+                    # Persist tool interactions as their own rows so history
+                    # (not just the live stream) shows what the agent did.
+                    await self._db.add_message(
+                        self._session_id, MessageRole.TOOL_CALL, event.data
+                    )
+                elif event.type == StreamEventType.TOOL_RESULT:
+                    await self._db.add_message(
+                        self._session_id, MessageRole.TOOL, event.data
+                    )
                 elif event.type == StreamEventType.ERROR:
                     errored = True
         finally:

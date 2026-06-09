@@ -17,6 +17,7 @@ class MessageRole(str, Enum):
     SYSTEM = "system"
     USER = "user"
     AGENT = "agent"
+    TOOL_CALL = "tool_call"
     TOOL = "tool"
 
 

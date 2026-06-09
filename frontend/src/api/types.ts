@@ -7,11 +7,12 @@ export type SessionStatus =
   | "COMPLETED"
   | "ERROR";
 
-export type MessageRole = "system" | "user" | "agent" | "tool";
+export type MessageRole = "system" | "user" | "agent" | "tool_call" | "tool";
 
 export type StreamEventType =
   | "text"
   | "tool_call"
+  | "tool_result"
   | "status"
   | "error"
   | "done"

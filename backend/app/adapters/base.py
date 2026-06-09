@@ -8,6 +8,7 @@ class StreamEventType(str, Enum):
     USER = "user"
     TEXT = "text"
     TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
     STATUS = "status"
     ERROR = "error"
     DONE = "done"

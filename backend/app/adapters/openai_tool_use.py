@@ -10,6 +10,11 @@ from app.adapters.tools.base import BaseTool
 
 logger = logging.getLogger("agentzoo.adapter.tool_use")
 
+# Tool results can be large (e.g. a fetched web page). The full result still
+# goes to the LLM context (_messages); only the persisted/broadcast copy in the
+# TOOL_RESULT event is truncated.
+_TOOL_RESULT_MAX = 8000
+
 
 class OpenAIToolUseAdapter(BaseAgentAdapter):
     def __init__(
@@ -148,6 +153,16 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                     "tool_call_id": tc.id,
                     "content": result,
                 })
+
+                result_view = (
+                    result[:_TOOL_RESULT_MAX] + "\n...[truncated]"
+                    if len(result) > _TOOL_RESULT_MAX
+                    else result
+                )
+                yield StreamEvent(
+                    type=StreamEventType.TOOL_RESULT,
+                    data=json.dumps({"name": fn_name, "result": result_view}),
+                )
 
         logger.info("turn complete iters=%d", loop_iter)
         yield StreamEvent(type=StreamEventType.DONE, data="")
