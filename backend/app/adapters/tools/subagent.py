@@ -103,14 +103,27 @@ class SubagentTool(BaseTool):
         if parent_session_id:
             body["parent_session_id"] = parent_session_id
 
+        # Look up the parent's working dir once: used both to anchor the git
+        # worktree and to inherit the parent's .env (API keys, gateway URL).
+        parent_dir = await self._parent_working_dir(base, parent_session_id)
+
         work_dir: str | None = None
         branch: str | None = None
         if isolation == "worktree":
-            work_dir, branch = await self._make_worktree(base, parent_session_id)
+            work_dir, branch = await self._make_worktree(parent_dir)
             body["working_dir"] = work_dir
             logger.info(
                 "worktree isolation: work_dir=%s branch=%s", work_dir, branch
             )
+
+        # Inherit the parent's .env so the subagent has the same runtime config.
+        # The gateway writes this first, then appends PARENT_SESSION_ID /
+        # MY_SESSION_ID (which win on duplicate keys). Only meaningful when the
+        # child gets a working_dir to receive the file.
+        if body.get("working_dir") and parent_dir:
+            parent_env = self._read_env(parent_dir)
+            if parent_env:
+                body["env"] = parent_env
 
         label = description or f"subagent:{agent_id}"
         logger.info(
@@ -235,7 +248,7 @@ class SubagentTool(BaseTool):
         return f"Error: Gateway returned {resp.status_code}: {detail}"
 
     async def _make_worktree(
-        self, base: str, parent_session_id: str | None
+        self, parent_dir: str | None
     ) -> tuple[str, str | None]:
         # Returns (work_dir, branch). branch is non-None only when we built a
         # real git worktree; otherwise we fall back to an empty scratch dir and
@@ -244,7 +257,6 @@ class SubagentTool(BaseTool):
         short_id = uuid.uuid4().hex[:8]
         work_dir = os.path.abspath(os.path.join(_worktree_root(), short_id))
 
-        parent_dir = await self._parent_working_dir(base, parent_session_id)
         if parent_dir and await self._is_git_repo(parent_dir):
             branch = f"subagent/{short_id}"
             # base = parent's current HEAD: the subagent continues from the
@@ -285,6 +297,19 @@ class SubagentTool(BaseTool):
             )
             return None
         return resp.json().get("working_dir")
+
+    @staticmethod
+    def _read_env(parent_dir: str) -> str | None:
+        # Read the parent's .env verbatim so the child inherits API keys, the
+        # gateway URL, etc. Returns None if there is no .env or it can't be read
+        # (e.g. a git worktree where .env is gitignored and thus absent) — the
+        # caller then just omits env from the create-session body.
+        env_path = os.path.join(parent_dir, ".env")
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return None
 
     @staticmethod
     async def _is_git_repo(path: str) -> bool:
