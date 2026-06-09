@@ -26,6 +26,8 @@ Each exits 0 on success, nonzero on failure — so they compose in CI or a shell
 | `test_tool_edit.py` | `write` + `edit` branches: create/overwrite, unique/replace_all/rejections | none |
 | `test_adapter_claude_code.py` | `ClaudeCodeAdapter` lifecycle in isolation, two turns | `claude` CLI in PATH |
 | `test_adapter_tool_use.py` | `OpenAIToolUseAdapter` lifecycle in isolation, with tool calls | `OPENAI_*` in `.env` |
+| `test_spawn_parent.py` | `parent_session_id`: persistence, `.env` injection (`PARENT_SESSION_ID`/`MY_SESSION_ID`), unknown parent → 404 | none (TestClient + mock DB) |
+| `test_tool_subagent.py` | `subagent` tool: git worktree creation + non-git fallback, parent `.env` inheritance through the router | `git` in PATH (TestClient + mock DB) |
 
 ## Env overrides
 
