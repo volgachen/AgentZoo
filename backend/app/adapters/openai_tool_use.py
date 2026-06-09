@@ -18,7 +18,9 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         model: str = "gpt-4o",
         base_url: str | None = None,
         api_key: str | None = None,
+        session_id: str | None = None,
     ) -> None:
+        super().__init__(session_id)
         self._tool_names = tool_names
         self._model = model
         self._base_url = base_url
@@ -80,6 +82,27 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
             except Exception as e:
                 logger.exception("chat.completions failed")
                 yield StreamEvent(type=StreamEventType.ERROR, data=f"LLM call failed: {e}")
+                return
+
+            # A correctly-spec'd Chat Completions endpoint returns a ChatCompletion
+            # object. Some OpenAI-compatible gateways (e.g. Codex/Responses-style
+            # backends whose base_url is .../codex/v1) don't implement
+            # /chat/completions and hand back a raw string body instead, which the
+            # SDK passes through unparsed — `response` is then a str and indexing
+            # .choices raises AttributeError. Fail loudly with a useful message.
+            if not hasattr(response, "choices"):
+                logger.error(
+                    "endpoint did not return a ChatCompletion (got %s): %r",
+                    type(response).__name__, response,
+                )
+                yield StreamEvent(
+                    type=StreamEventType.ERROR,
+                    data=(
+                        "LLM endpoint did not return a Chat Completions response. "
+                        "Check that OPENAI_BASE_URL points at an OpenAI-compatible "
+                        "/chat/completions endpoint (not a Codex/Responses backend)."
+                    ),
+                )
                 return
 
             choice = response.choices[0]

@@ -21,6 +21,12 @@ class StreamEvent(BaseModel):
 class BaseAgentAdapter(ABC):
     session_id: str | None = None
 
+    def __init__(self, session_id: str | None = None) -> None:
+        # session_id is fixed at construction so tools that read it (e.g. the
+        # subagent tool, which needs it as parent_session_id) see the real id
+        # before start() runs — not None patched in later.
+        self.session_id = session_id
+
     @abstractmethod
     async def start(self, system_prompt: str) -> None:
         """启动 Agent，建立底层进程或连接。"""

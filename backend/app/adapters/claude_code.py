@@ -19,7 +19,8 @@ class ClaudeCodeAdapter(BaseAgentAdapter):
     history on disk.
     """
 
-    def __init__(self, working_dir: str | None = None) -> None:
+    def __init__(self, working_dir: str | None = None, session_id: str | None = None) -> None:
+        super().__init__(session_id)
         self._claude_session_id: str = str(uuid.uuid4())
         self._system_prompt: str = ""
         self._working_dir: str | None = working_dir

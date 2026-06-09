@@ -121,7 +121,7 @@ async def create_session(
         logger.info("wrote .env to %s", env_path)
 
     if agent.agent_type == AgentType.CLAUDE_CODE:
-        adapter = ClaudeCodeAdapter(working_dir=working_dir)
+        adapter = ClaudeCodeAdapter(working_dir=working_dir, session_id=session.id)
         try:
             await adapter.start(agent.system_prompt)
         except RuntimeError as e:
@@ -137,6 +137,7 @@ async def create_session(
             tool_names=agent.tool_names,
             model=agent.openai_model,
             base_url=agent.openai_base_url,
+            session_id=session.id,
         )
         try:
             await adapter.start(agent.system_prompt)

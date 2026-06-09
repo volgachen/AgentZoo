@@ -37,7 +37,6 @@ class SessionRunner:
     ) -> None:
         self._session_id = session_id
         self._adapter = adapter
-        self._adapter.session_id = session_id
         self._db = db
         self._inbox: asyncio.Queue[_InboxItem] = asyncio.Queue()
         self._subscribers: set[asyncio.Queue[StreamEvent | None]] = set()
