@@ -1,8 +1,8 @@
+import asyncio
 import json
 import logging
 import os
 import uuid
-from pathlib import Path
 import httpx
 from app.adapters.tools.base import BaseTool
 from app.adapters.tools.registry import register_tool
@@ -11,11 +11,17 @@ logger = logging.getLogger("agentzoo.tool.subagent")
 
 _CREATE_SESSION_TIMEOUT = 30
 _POST_MESSAGE_TIMEOUT = 15
+_GET_SESSION_TIMEOUT = 15
+_GIT_TIMEOUT = 30
 
-# Where isolated working directories live for "worktree" isolation.
-_WORKTREE_ROOT = os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "tmp", "sessions"
-)
+
+def _worktree_root() -> str:
+    # AGENTZOO_WORKTREE_ROOT lets operators relocate subagent worktrees
+    # globally. Resolved at call time (not import) so the env var stays mutable.
+    default = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "tmp", "sessions"
+    )
+    return os.getenv("AGENTZOO_WORKTREE_ROOT", default)
 
 
 @register_tool
@@ -32,8 +38,12 @@ class SubagentTool(BaseTool):
         "- agent-research-001: OpenAI tool-use agent with web_fetch, web_search, "
         "bash, read, write, edit\n\n"
         "Choose isolation=\"worktree\" when the subagent needs its own isolated "
-        "working directory (recommended for Claude Code agents). Omit isolation "
-        "to share the parent context."
+        "working directory (recommended for Claude Code agents). This creates a "
+        "real git worktree off your working directory on a new branch "
+        "(subagent/<id>), so the subagent sees your current code and its commits "
+        "land on that branch for you to merge later. If your working directory "
+        "is not a git repo, it falls back to an isolated empty directory. Omit "
+        "isolation to share the parent context."
     )
 
     def parameters_schema(self) -> dict:
@@ -62,9 +72,13 @@ class SubagentTool(BaseTool):
                 "isolation": {
                     "type": "string",
                     "description": (
-                        "'worktree' creates an isolated working directory for the "
-                        "subagent under backend/tmp/sessions/. Omit to run without "
-                        "filesystem isolation (tool-use agents don't need it)."
+                        "'worktree' creates a git worktree off your working "
+                        "directory on a new branch (subagent/<id>) so the "
+                        "subagent sees your current code and commits there. Falls "
+                        "back to an isolated empty directory under the worktree "
+                        "root if your working directory is not a git repo. Omit to "
+                        "run without filesystem isolation (tool-use agents don't "
+                        "need it)."
                     ),
                     "enum": ["worktree"],
                 },
@@ -90,13 +104,13 @@ class SubagentTool(BaseTool):
             body["parent_session_id"] = parent_session_id
 
         work_dir: str | None = None
+        branch: str | None = None
         if isolation == "worktree":
-            work_dir = os.path.abspath(
-                os.path.join(_WORKTREE_ROOT, str(uuid.uuid4()))
-            )
-            os.makedirs(work_dir, exist_ok=False)
+            work_dir, branch = await self._make_worktree(base, parent_session_id)
             body["working_dir"] = work_dir
-            logger.info("worktree isolation: work_dir=%s", work_dir)
+            logger.info(
+                "worktree isolation: work_dir=%s branch=%s", work_dir, branch
+            )
 
         label = description or f"subagent:{agent_id}"
         logger.info(
@@ -174,11 +188,25 @@ class SubagentTool(BaseTool):
                 "(results will be reported back to you when done)"
             )
         lines.append(f"  agent_id: {agent_id}")
-        if isolation:
+        if isolation == "worktree":
+            if branch:
+                lines.append(f"  isolation: worktree (git, branch={branch})")
+            else:
+                lines.append(
+                    "  isolation: worktree (scratch dir — working directory is "
+                    "not a git repo)"
+                )
+        elif isolation:
             lines.append(f"  isolation: {isolation}")
         if work_dir:
             lines.append(f"  working_dir: {work_dir}")
         lines.append("")
+        if branch:
+            lines.append(
+                f"The subagent's commits land on branch '{branch}'. When it's "
+                f"done, run `git merge {branch}` in your working directory to "
+                "integrate them."
+            )
         lines.append(f"Check progress: GET {base}/api/v1/sessions/{new_id}")
         lines.append(f"Send follow-up: POST {base}/api/v1/sessions/{new_id}/messages")
 
@@ -205,3 +233,85 @@ class SubagentTool(BaseTool):
             return f"Error: {detail}"
         logger.error("create session failed status=%d body=%s", resp.status_code, detail)
         return f"Error: Gateway returned {resp.status_code}: {detail}"
+
+    async def _make_worktree(
+        self, base: str, parent_session_id: str | None
+    ) -> tuple[str, str | None]:
+        # Returns (work_dir, branch). branch is non-None only when we built a
+        # real git worktree; otherwise we fall back to an empty scratch dir and
+        # branch is None. work_dir always ends up created on disk (by git for
+        # the worktree case, by os.makedirs for the fallback).
+        short_id = uuid.uuid4().hex[:8]
+        work_dir = os.path.abspath(os.path.join(_worktree_root(), short_id))
+
+        parent_dir = await self._parent_working_dir(base, parent_session_id)
+        if parent_dir and await self._is_git_repo(parent_dir):
+            branch = f"subagent/{short_id}"
+            # base = parent's current HEAD: the subagent continues from the
+            # parent's working state, not from a remote ref. git creates work_dir.
+            ok = await self._run_git(
+                parent_dir,
+                "worktree", "add", "-b", branch, work_dir, "HEAD",
+            )
+            if ok:
+                return work_dir, branch
+            logger.warning(
+                "git worktree add failed for parent=%s; falling back to scratch dir",
+                parent_dir,
+            )
+
+        # Fallback: isolated empty directory, no git.
+        os.makedirs(work_dir, exist_ok=False)
+        return work_dir, None
+
+    async def _parent_working_dir(
+        self, base: str, parent_session_id: str | None
+    ) -> str | None:
+        if not parent_session_id:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=_GET_SESSION_TIMEOUT) as client:
+                resp = await client.get(
+                    f"{base}/api/v1/sessions/{parent_session_id}"
+                )
+        except Exception:
+            logger.exception(
+                "failed to fetch parent session %s for worktree", parent_session_id
+            )
+            return None
+        if resp.status_code != 200:
+            logger.warning(
+                "parent session %s lookup returned %d", parent_session_id, resp.status_code
+            )
+            return None
+        return resp.json().get("working_dir")
+
+    @staticmethod
+    async def _is_git_repo(path: str) -> bool:
+        return await SubagentTool._run_git(
+            path, "rev-parse", "--is-inside-work-tree"
+        )
+
+    @staticmethod
+    async def _run_git(cwd: str, *args: str) -> bool:
+        # exec (not shell) — no injection surface. Returns True on exit code 0.
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cwd, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=_GIT_TIMEOUT
+            )
+        except (OSError, asyncio.TimeoutError):
+            logger.exception("git %s in %s failed to run", " ".join(args), cwd)
+            return False
+        if proc.returncode != 0:
+            logger.warning(
+                "git %s in %s exited %s: %s",
+                " ".join(args), cwd, proc.returncode,
+                stderr.decode(errors="replace").strip()[:300],
+            )
+            return False
+        return True
