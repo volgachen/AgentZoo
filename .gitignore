@@ -21,3 +21,7 @@ dist/
 
 # Plugin runtime sources
 backend/.plugins/
+
+# Local-only docs (kept out of git history)
+CLAUDE.md
+TODO.md
