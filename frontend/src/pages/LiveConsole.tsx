@@ -55,7 +55,7 @@ function EventLine({ event }: { event: StreamEvent }) {
         ? event.data
         : JSON.stringify(event.data);
   return (
-    <div className={`font-mono text-sm whitespace-pre-wrap break-all ${style}`}>
+    <div className={`text-left font-mono text-sm whitespace-pre-wrap break-all ${style}`}>
       {prefix}
       {body}
     </div>
@@ -121,6 +121,10 @@ export default function LiveConsole() {
         <div>
           <h1 className="text-lg font-semibold text-white">Live Console</h1>
           <p className="text-xs text-gray-500 font-mono">{session.id}</p>
+          <p className="text-xs text-gray-500 font-mono">
+            <span className="text-gray-600">cwd: </span>
+            {session.working_dir ?? "—"}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {generating ? (
