@@ -61,6 +61,29 @@ class Message(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class Task(BaseModel):
+    # Per-list monotonic integer, stored as a string (e.g. "1", "2") so agents
+    # can reference tasks as "#1". Assigned by the DB's task_counters, never reused.
+    id: str
+    task_list_id: str
+    subject: str
+    description: str
+    active_form: Optional[str] = None  # present-continuous form for spinners
+    owner: Optional[str] = None
+    status: TaskStatus = TaskStatus.PENDING
+    blocks: list[str] = Field(default_factory=list)       # task IDs this task blocks
+    blocked_by: list[str] = Field(default_factory=list)   # task IDs that block this one
+    metadata: Optional[dict] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class PluginStatus(str, Enum):
     STOPPED = "stopped"
     RUNNING = "running"

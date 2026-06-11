@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from typing import Dict, List
-from app.db.interface import IAgentDatabase
+from app.db.interface import IAgentDatabase, _UNSET
 from app.models.domain import (
     AgentTemplate, AgentType, Session, SessionStatus,
     Message, MessageRole,
     Plugin, PluginStatus,
+    Task, TaskStatus,
 )
 
 
@@ -12,10 +13,46 @@ _SEED_AGENTS = [
     AgentTemplate(
         id="agent-research-001",
         name="Research Agent",
-        description="通过 Arxiv / Web 搜索工具检索论文，汇总后生成研究报告。",
+        description="通过网络搜索、论文检索、网页抓取等工具搜集资料，整理为结构化研究报告。",
         agent_type=AgentType.TOOL_USE,
-        system_prompt="You are a research assistant. Search for papers and summarize findings.",
-        tool_names=["web_search", "arxiv_search"],
+        system_prompt=(
+            "You are a research agent specialized in gathering, vetting, and synthesizing "
+            "information from the web. Your job is to find high-quality sources and deliver "
+            "actionable research reports.\n\n"
+            "## Core workflow\n"
+            "1. **Understand the request** — clarify scope, time constraints, and required "
+            "depth before searching. If anything is ambiguous, ask before proceeding.\n"
+            "2. **Search broadly** — use web_search to cast a wide net. Run multiple "
+            "searches with different angles and keywords. Prefer authoritative domains "
+            "(.edu, .gov, official docs, reputable publications). For academic topics, "
+            "use arxiv_search.\n"
+            "3. **Read deeply** — use web_fetch on the most promising results. Never "
+            "summarize from search snippets alone — always read the source.\n"
+            "4. **Cross-verify** — key claims should be confirmed by at least 2 "
+            "independent sources. Flag contradictions or outlier claims explicitly.\n"
+            "5. **Record** — use write to save your findings as a structured markdown "
+            "file. Use edit to refine and update your notes as new information "
+            "comes in. Use read to review previously saved materials.\n"
+            "6. **Deliver** — when the research is complete, send your report to the "
+            "requesting session via session_send. Include key findings, evidence, "
+            "sources, and confidence levels.\n\n"
+            "## Output format for reports\n"
+            "Every finding should include:\n"
+            "- **Key finding** (1-2 sentences)\n"
+            "- **Evidence** (what the source says, with quotes under 125 chars)\n"
+            "- **Source** (URL + brief credibility note)\n"
+            "- **Confidence** (High / Medium / Low — based on source quality and "
+            "cross-verification)\n\n"
+            "## Rules\n"
+            "- Never fabricate URLs or cite a source you haven't fetched.\n"
+            "- When web_fetch fails, report it — don't guess what was on the page.\n"
+            "- If you find contradictory information, present both sides.\n"
+            "- Structure long reports with clear headings for readability."
+        ),
+        tool_names=[
+            "web_search", "web_fetch", "arxiv_search",
+            "session_send", "write", "read", "edit",
+        ],
     ),
     AgentTemplate(
         id="agent-claude-code-001",
@@ -33,6 +70,10 @@ class MockMemoryDatabase(IAgentDatabase):
         self._sessions: Dict[str, Session] = {}
         self._messages: Dict[str, List[Message]] = {}
         self._plugins: Dict[str, Plugin] = {}
+        # tasks keyed by task_list_id -> task_id -> Task
+        self._tasks: Dict[str, Dict[str, Task]] = {}
+        # monotonic per-list id counter; survives deletes (ids never reused)
+        self._task_counters: Dict[str, int] = {}
 
     async def list_agents(self) -> List[AgentTemplate]:
         return list(self._agents.values())
@@ -190,3 +231,105 @@ class MockMemoryDatabase(IAgentDatabase):
                 plugin.last_error = error
         plugin.updated_at = now
         return plugin
+
+    # ------- Tasks -------
+
+    async def create_task(
+        self,
+        task_list_id: str,
+        subject: str,
+        description: str,
+        *,
+        active_form: str | None = None,
+        metadata: dict | None = None,
+    ) -> Task:
+        next_id = self._task_counters.get(task_list_id, 0) + 1
+        self._task_counters[task_list_id] = next_id
+        task = Task(
+            id=str(next_id),
+            task_list_id=task_list_id,
+            subject=subject,
+            description=description,
+            active_form=active_form,
+            metadata=metadata,
+        )
+        self._tasks.setdefault(task_list_id, {})[task.id] = task
+        return task
+
+    async def get_task(self, task_list_id: str, task_id: str) -> Task | None:
+        return self._tasks.get(task_list_id, {}).get(task_id)
+
+    async def list_tasks(self, task_list_id: str) -> List[Task]:
+        tasks = self._tasks.get(task_list_id, {})
+        return sorted(tasks.values(), key=lambda t: int(t.id))
+
+    async def update_task(
+        self,
+        task_list_id: str,
+        task_id: str,
+        *,
+        subject: str | None = None,
+        description: str | None = None,
+        active_form: str | None = None,
+        status: TaskStatus | None = None,
+        owner: str | None = _UNSET,
+        metadata: dict | None = None,
+        add_blocks: list[str] | None = None,
+        add_blocked_by: list[str] | None = None,
+    ) -> Task | None:
+        task = self._tasks.get(task_list_id, {}).get(task_id)
+        if task is None:
+            return None
+
+        if subject is not None:
+            task.subject = subject
+        if description is not None:
+            task.description = description
+        if active_form is not None:
+            task.active_form = active_form
+        if status is not None:
+            task.status = status
+        if owner is not _UNSET:
+            task.owner = owner
+        if metadata is not None:
+            merged = dict(task.metadata or {})
+            for k, v in metadata.items():
+                if v is None:
+                    merged.pop(k, None)
+                else:
+                    merged[k] = v
+            task.metadata = merged or None
+
+        # Reciprocal dependency wiring: A blocks B  <=>  B blockedBy A.
+        for other_id in add_blocks or []:
+            other = self._tasks.get(task_list_id, {}).get(other_id)
+            if other is None:
+                continue
+            if other_id not in task.blocks:
+                task.blocks.append(other_id)
+            if task_id not in other.blocked_by:
+                other.blocked_by.append(task_id)
+        for other_id in add_blocked_by or []:
+            other = self._tasks.get(task_list_id, {}).get(other_id)
+            if other is None:
+                continue
+            if other_id not in task.blocked_by:
+                task.blocked_by.append(other_id)
+            if task_id not in other.blocks:
+                other.blocks.append(task_id)
+
+        task.updated_at = datetime.now(timezone.utc)
+        return task
+
+    async def delete_task(self, task_list_id: str, task_id: str) -> bool:
+        tasks = self._tasks.get(task_list_id, {})
+        if task_id not in tasks:
+            return False
+        del tasks[task_id]
+        # Cascade: strip dangling references from every other task.
+        for other in tasks.values():
+            if task_id in other.blocks:
+                other.blocks.remove(task_id)
+            if task_id in other.blocked_by:
+                other.blocked_by.remove(task_id)
+        return True

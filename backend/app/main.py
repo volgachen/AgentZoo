@@ -9,7 +9,7 @@ setup_logging()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.deps import init_db, close_db
-from app.routers import agents, sessions, fs, plugins, tools
+from app.routers import agents, sessions, fs, plugins, tools, tasks
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(fs.router, prefix="/api/v1")
 app.include_router(plugins.router, prefix="/api/v1")
 app.include_router(tools.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1")
 
 
 @app.get("/health")

@@ -7,7 +7,7 @@ import aiomysql
 from aiomysql import DictCursor, Pool
 
 from app.config import Settings
-from app.db.interface import IAgentDatabase
+from app.db.interface import IAgentDatabase, _UNSET
 from app.models.domain import (
     AgentTemplate,
     AgentType,
@@ -17,6 +17,8 @@ from app.models.domain import (
     PluginStatus,
     Session,
     SessionStatus,
+    Task,
+    TaskStatus,
 )
 
 _SCHEMA_SQL = [
@@ -68,17 +70,103 @@ CREATE TABLE IF NOT EXISTS plugins (
     created_at      DATETIME(3)  NOT NULL,
     updated_at      DATETIME(3)  NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """\
+CREATE TABLE IF NOT EXISTS tasks (
+    task_list_id  VARCHAR(64)  NOT NULL,
+    id            VARCHAR(20)  NOT NULL,
+    subject       TEXT         NOT NULL,
+    description   LONGTEXT     NOT NULL,
+    active_form   VARCHAR(500) DEFAULT NULL,
+    owner         VARCHAR(200) DEFAULT NULL,
+    status        VARCHAR(20)  NOT NULL DEFAULT 'pending',
+    blocks        JSON         NOT NULL,
+    blocked_by    JSON         NOT NULL,
+    metadata      JSON         DEFAULT NULL,
+    created_at    DATETIME(3)  NOT NULL,
+    updated_at    DATETIME(3)  NOT NULL,
+    PRIMARY KEY (task_list_id, id),
+    INDEX idx_tasks_list (task_list_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """\
+CREATE TABLE IF NOT EXISTS task_counters (
+    task_list_id  VARCHAR(64)  PRIMARY KEY,
+    next_id       BIGINT       NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 ]
 
 _SEED_AGENTS: list[dict[str, Any]] = [
     {
-        "id": "agent-research-001",
-        "name": "Research Agent",
-        "description": "通过 Arxiv / Web 搜索工具检索论文，汇总后生成研究报告。",
+        "id": "main-agent",
+        "name": "Main Agent",
+        "description": "一个通用的智能体，配备了多种工具，能够处理各种任务。",
         "agent_type": "tool_use",
-        "system_prompt": "You are a research assistant. Search for papers and summarize findings.",
-        "tool_names": ["web_search", "arxiv_search"],
-        "openai_model": "gpt-4o",
+        "system_prompt": (
+            "You are a information searcher specialized in gathering, vetting, and synthesizing "
+            "information from the web. Your job is to find high-quality sources and deliver "
+            "actionable research reports.\n\n"
+            "## Core workflow\n"
+            "1. **Understand the request** — clarify scope, time constraints, and required "
+            "depth before searching. If anything is ambiguous, ask before proceeding.\n"
+            "2. **Search broadly** — use web_search to cast a wide net. Run multiple "
+            "searches with different angles and keywords. Prefer authoritative domains "
+            "(.edu, .gov, official docs, reputable publications).\n"
+            "3. **Read deeply** — use web_fetch on the most promising results. Never "
+            "summarize from search snippets alone — always read the source.\n"
+            "4. **Cross-verify** — key claims should be confirmed by at least 2 "
+            "independent sources. Flag contradictions or outlier claims explicitly.\n"
+            "5. **Record** — use write to save your findings as a structured markdown "
+            "file. Use edit to refine and update your notes as new information "
+            "comes in. Use read to review previously saved materials.\n"
+            "6. **Deliver** — Deliver the results as required. If the task requires to save the information, just do it following the required file struture and format. "
+            "If the task requires a feedback report, send your report to the requesting session via session_send.\n\n"
+            "## Rules\n"
+            "- Never fabricate URLs or cite a source you haven't fetched.\n"
+            "- When web_fetch fails, report it — don't guess what was on the page.\n"
+            "- If you find contradictory information, present both sides.\n"
+            "- Structure long reports with clear headings for readability."
+        ),
+        "tool_names": [
+            "web_search", "web_fetch", "arxiv_search",
+            "session_send", "write", "read", "edit",
+        ],
+        "openai_model": "gpt-5.4",
+        "openai_base_url": None,
+    },
+    {
+        "id": "information_searcher",
+        "name": "Information Searcher",
+        "description": "通过网络搜索、论文检索、网页抓取等工具搜集资料，整理为结构化研究报告。",
+        "agent_type": "tool_use",
+        "system_prompt": (
+            "You are a information searcher specialized in gathering, vetting, and synthesizing "
+            "information from the web. Your job is to find high-quality sources and deliver "
+            "actionable research reports.\n\n"
+            "## Core workflow\n"
+            "1. **Understand the request** — clarify scope, time constraints, and required "
+            "depth before searching. If anything is ambiguous, ask before proceeding.\n"
+            "2. **Search broadly** — use web_search to cast a wide net. Run multiple "
+            "searches with different angles and keywords. Prefer authoritative domains "
+            "(.edu, .gov, official docs, reputable publications).\n"
+            "3. **Read deeply** — use web_fetch on the most promising results. Never "
+            "summarize from search snippets alone — always read the source.\n"
+            "4. **Cross-verify** — key claims should be confirmed by at least 2 "
+            "independent sources. Flag contradictions or outlier claims explicitly.\n"
+            "5. **Record** — use write to save your findings as a structured markdown "
+            "file. Use edit to refine and update your notes as new information "
+            "comes in. Use read to review previously saved materials.\n"
+            "6. **Deliver** — Deliver the results as required. If the task requires to save the information, just do it following the required file struture and format. "
+            "If the task requires a feedback report, send your report to the requesting session via session_send.\n\n"
+            "## Rules\n"
+            "- Never fabricate URLs or cite a source you haven't fetched.\n"
+            "- When web_fetch fails, report it — don't guess what was on the page.\n"
+            "- If you find contradictory information, present both sides.\n"
+            "- Structure long reports with clear headings for readability."
+        ),
+        "tool_names": [
+            "web_search", "web_fetch", "arxiv_search",
+            "session_send", "write", "read", "edit",
+        ],
+        "openai_model": "gpt-5.4",
         "openai_base_url": None,
     },
     {
@@ -88,7 +176,7 @@ _SEED_AGENTS: list[dict[str, Any]] = [
         "agent_type": "claude_code",
         "system_prompt": "You are a coding assistant powered by Claude Code.",
         "tool_names": [],
-        "openai_model": "gpt-4o",
+        "openai_model": "claude-sonnet",
         "openai_base_url": None,
     },
 ]
@@ -144,6 +232,33 @@ def _row_to_plugin(row: dict[str, Any]) -> Plugin:
         last_exited_at=row["last_exited_at"],
         last_exit_code=row["last_exit_code"],
         last_error=row["last_error"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _json_col(value: Any, default: Any) -> Any:
+    # JSON columns come back as already-decoded objects on some aiomysql/MySQL
+    # versions and as raw strings on others; normalize both.
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _row_to_task(row: dict[str, Any]) -> Task:
+    return Task(
+        id=row["id"],
+        task_list_id=row["task_list_id"],
+        subject=row["subject"],
+        description=row["description"],
+        active_form=row["active_form"],
+        owner=row["owner"],
+        status=TaskStatus(row["status"]),
+        blocks=_json_col(row["blocks"], []),
+        blocked_by=_json_col(row["blocked_by"], []),
+        metadata=_json_col(row["metadata"], None),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -512,3 +627,198 @@ class MySqlDatabase(IAgentDatabase):
                     values,
                 )
         return await self.get_plugin(plugin_id)
+
+    # ---- Tasks ----
+
+    async def _next_task_id(self, task_list_id: str) -> int:
+
+        # Atomic per-list counter via the LAST_INSERT_ID upsert trick: the INSERT
+        # seeds next_id=1, the ON DUPLICATE path bumps it; both stash the value in
+        # the connection's LAST_INSERT_ID() so a single follow-up SELECT reads it.
+        # Counter survives deletes, so ids are monotonic and never reused.
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """INSERT INTO task_counters (task_list_id, next_id)
+                       VALUES (%s, LAST_INSERT_ID(1))
+                       ON DUPLICATE KEY UPDATE next_id = LAST_INSERT_ID(next_id + 1)""",
+                    (task_list_id,),
+                )
+                await cur.execute("SELECT LAST_INSERT_ID()")
+                row = await cur.fetchone()
+        return int(row[0])
+
+    async def create_task(
+        self,
+        task_list_id: str,
+        subject: str,
+        description: str,
+        *,
+        active_form: str | None = None,
+        metadata: dict | None = None,
+    ) -> Task:
+        next_id = await self._next_task_id(task_list_id)
+        task = Task(
+            id=str(next_id),
+            task_list_id=task_list_id,
+            subject=subject,
+            description=description,
+            active_form=active_form,
+            metadata=metadata,
+        )
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """INSERT INTO tasks
+                       (task_list_id, id, subject, description, active_form,
+                        owner, status, blocks, blocked_by, metadata,
+                        created_at, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        task.task_list_id,
+                        task.id,
+                        task.subject,
+                        task.description,
+                        task.active_form,
+                        task.owner,
+                        task.status.value,
+                        json.dumps(task.blocks),
+                        json.dumps(task.blocked_by),
+                        json.dumps(task.metadata) if task.metadata is not None else None,
+                        task.created_at,
+                        task.updated_at,
+                    ),
+                )
+        return task
+
+    async def get_task(self, task_list_id: str, task_id: str) -> Task | None:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cur:
+                await cur.execute(
+                    "SELECT * FROM tasks WHERE task_list_id = %s AND id = %s",
+                    (task_list_id, task_id),
+                )
+                row = await cur.fetchone()
+        return _row_to_task(row) if row else None
+
+    async def list_tasks(self, task_list_id: str) -> list[Task]:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cur:
+                await cur.execute(
+                    "SELECT * FROM tasks WHERE task_list_id = %s "
+                    "ORDER BY CAST(id AS UNSIGNED)",
+                    (task_list_id,),
+                )
+                rows = await cur.fetchall()
+        return [_row_to_task(r) for r in rows]
+
+    async def _write_task(self, task: Task) -> None:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """UPDATE tasks SET
+                       subject = %s, description = %s, active_form = %s,
+                       owner = %s, status = %s, blocks = %s, blocked_by = %s,
+                       metadata = %s, updated_at = %s
+                       WHERE task_list_id = %s AND id = %s""",
+                    (
+                        task.subject,
+                        task.description,
+                        task.active_form,
+                        task.owner,
+                        task.status.value,
+                        json.dumps(task.blocks),
+                        json.dumps(task.blocked_by),
+                        json.dumps(task.metadata) if task.metadata is not None else None,
+                        task.updated_at,
+                        task.task_list_id,
+                        task.id,
+                    ),
+                )
+
+    async def update_task(
+        self,
+        task_list_id: str,
+        task_id: str,
+        *,
+        subject: str | None = None,
+        description: str | None = None,
+        active_form: str | None = None,
+        status: TaskStatus | None = None,
+        owner: str | None = _UNSET,
+        metadata: dict | None = None,
+        add_blocks: list[str] | None = None,
+        add_blocked_by: list[str] | None = None,
+    ) -> Task | None:
+        task = await self.get_task(task_list_id, task_id)
+        if task is None:
+            return None
+
+        if subject is not None:
+            task.subject = subject
+        if description is not None:
+            task.description = description
+        if active_form is not None:
+            task.active_form = active_form
+        if status is not None:
+            task.status = status
+        if owner is not _UNSET:
+            task.owner = owner
+        if metadata is not None:
+            merged = dict(task.metadata or {})
+            for k, v in metadata.items():
+                if v is None:
+                    merged.pop(k, None)
+                else:
+                    merged[k] = v
+            task.metadata = merged or None
+
+        # Reciprocal dependency wiring: A blocks B  <=>  B blockedBy A. The other
+        # side of each edge is read-modify-written separately (autocommit, no txn).
+        for other_id in add_blocks or []:
+            other = await self.get_task(task_list_id, other_id)
+            if other is None:
+                continue
+            if other_id not in task.blocks:
+                task.blocks.append(other_id)
+            if task_id not in other.blocked_by:
+                other.blocked_by.append(task_id)
+                other.updated_at = datetime.now(timezone.utc)
+                await self._write_task(other)
+        for other_id in add_blocked_by or []:
+            other = await self.get_task(task_list_id, other_id)
+            if other is None:
+                continue
+            if other_id not in task.blocked_by:
+                task.blocked_by.append(other_id)
+            if task_id not in other.blocks:
+                other.blocks.append(task_id)
+                other.updated_at = datetime.now(timezone.utc)
+                await self._write_task(other)
+
+        task.updated_at = datetime.now(timezone.utc)
+        await self._write_task(task)
+        return task
+
+    async def delete_task(self, task_list_id: str, task_id: str) -> bool:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                result = await cur.execute(
+                    "DELETE FROM tasks WHERE task_list_id = %s AND id = %s",
+                    (task_list_id, task_id),
+                )
+        if result == 0:
+            return False
+        # Cascade: strip dangling references from every other task in the list.
+        for other in await self.list_tasks(task_list_id):
+            changed = False
+            if task_id in other.blocks:
+                other.blocks.remove(task_id)
+                changed = True
+            if task_id in other.blocked_by:
+                other.blocked_by.remove(task_id)
+                changed = True
+            if changed:
+                other.updated_at = datetime.now(timezone.utc)
+                await self._write_task(other)
+        return True

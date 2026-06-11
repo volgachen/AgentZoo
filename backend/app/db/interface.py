@@ -1,9 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import Any, List
 from app.models.domain import (
     AgentTemplate, Session, SessionStatus, Message, MessageRole,
-    Plugin, PluginStatus,
+    Plugin, PluginStatus, Task, TaskStatus,
 )
+
+# Sentinel for update_task(owner=...) so callers can distinguish "leave owner
+# unchanged" (the default) from "clear the owner" (explicitly passing None).
+_UNSET: Any = object()
 
 
 class IAgentDatabase(ABC):
@@ -94,3 +98,41 @@ class IAgentDatabase(ABC):
         exit_code: int | None = None,
         error: str | None = None,
     ) -> Plugin: pass
+
+    # ------- Tasks -------
+    @abstractmethod
+    async def create_task(
+        self,
+        task_list_id: str,
+        subject: str,
+        description: str,
+        *,
+        active_form: str | None = None,
+        metadata: dict | None = None,
+    ) -> Task: pass
+
+    @abstractmethod
+    async def get_task(self, task_list_id: str, task_id: str) -> Task | None: pass
+
+    @abstractmethod
+    async def list_tasks(self, task_list_id: str) -> List[Task]: pass
+
+    @abstractmethod
+    async def update_task(
+        self,
+        task_list_id: str,
+        task_id: str,
+        *,
+        subject: str | None = None,
+        description: str | None = None,
+        active_form: str | None = None,
+        status: TaskStatus | None = None,
+        owner: str | None = _UNSET,
+        metadata: dict | None = None,
+        add_blocks: list[str] | None = None,
+        add_blocked_by: list[str] | None = None,
+    ) -> Task | None: pass
+
+    @abstractmethod
+    async def delete_task(self, task_list_id: str, task_id: str) -> bool: pass
+
