@@ -3,6 +3,16 @@ import { useEffect } from "react";
 import { useStore } from "../store/sessions";
 import type { Session, SessionStatus, StreamEvent } from "../api/types";
 
+function formatCreatedAt(iso: string): string {
+  // The backend stores created_at as UTC but the DATETIME column serializes
+  // without a timezone suffix, so a bare "2026-06-09T03:00:00" would be parsed
+  // as local time. Append "Z" when no offset is present so it's read as UTC.
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasTz ? iso : `${iso}Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
 const STATUS_STYLE: Record<SessionStatus, string> = {
   INITIALIZING: "bg-yellow-900 text-yellow-300",
   RUNNING: "bg-green-900 text-green-300",
@@ -109,6 +119,7 @@ export default function SessionDashboard() {
               <th className="pb-3 pr-4 font-medium">Agent</th>
               <th className="pb-3 pr-4 font-medium">Working Dir</th>
               <th className="pb-3 pr-4 font-medium">Status</th>
+              <th className="pb-3 pr-4 font-medium">Created</th>
               <th className="pb-3 pr-4 font-medium">Events</th>
               <th className="pb-3 font-medium">Actions</th>
             </tr>
@@ -143,6 +154,9 @@ export default function SessionDashboard() {
                   >
                     {session.status}
                   </span>
+                </td>
+                <td className="py-3 pr-4 text-gray-400 text-xs whitespace-nowrap">
+                  {formatCreatedAt(session.created_at)}
                 </td>
                 <td className="py-3 pr-4 text-gray-400">{events.length}</td>
                 <td className="py-3 flex gap-2">
