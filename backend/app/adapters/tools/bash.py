@@ -88,6 +88,7 @@ class BashTool(BaseTool):
             stdout=log_file,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            cwd=self.working_dir,
         )
         return (
             f"[Running in background] pid={proc.pid}\n"
@@ -101,6 +102,7 @@ class BashTool(BaseTool):
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            cwd=self.working_dir,
         )
 
         try:

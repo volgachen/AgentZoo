@@ -45,6 +45,7 @@ class EditTool(BaseTool):
         new_string: str,
         replace_all: bool = False,
     ) -> str:
+        file_path = self.resolve_path(file_path)
         if not os.path.isfile(file_path):
             return f"[Error] File not found: {file_path}"
         if old_string == new_string:

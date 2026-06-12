@@ -47,6 +47,7 @@ class ReadTool(BaseTool):
         offset: int | None = None,
         limit: int | None = None,
     ) -> str:
+        path = self.resolve_path(path)
         if not os.path.isfile(path):
             return f"[Error] File not found: {path}"
 

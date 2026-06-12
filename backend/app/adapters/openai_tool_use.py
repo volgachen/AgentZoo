@@ -25,12 +25,18 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         base_url: str | None = None,
         api_key: str | None = None,
         session_id: str | None = None,
+        working_dir: str | None = None,
     ) -> None:
         super().__init__(session_id)
         self._tool_names = tool_names
         self._model = model
         self._base_url = base_url
         self._api_key = api_key
+        # Pass-through to filesystem tools so bash/read/write/edit run in the
+        # session's working_dir instead of the backend process's cwd. The
+        # ClaudeCode adapter handles this naturally by spawning the CLI with
+        # cwd=working_dir; tool-use has to thread it into each tool itself.
+        self._working_dir = working_dir
         self._tools: list[BaseTool] = []
         self._messages: list[dict] = []
         self._pending: str | None = None
@@ -50,6 +56,7 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         self._tools = load_tools(self._tool_names)
         for t in self._tools:
             t.session_id = self.session_id
+            t.working_dir = self._working_dir
         if system_prompt:
             self._messages = [{"role": "system", "content": system_prompt}]
         self._alive = True

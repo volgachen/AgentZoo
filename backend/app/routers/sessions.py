@@ -56,6 +56,7 @@ async def _build_runner(
             model=agent.openai_model,
             base_url=agent.openai_base_url,
             session_id=session.id,
+            working_dir=session.working_dir,
         )
     else:
         raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")

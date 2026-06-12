@@ -29,6 +29,7 @@ class WriteTool(BaseTool):
         }
 
     async def execute(self, file_path: str, content: str) -> str:
+        file_path = self.resolve_path(file_path)
         existed = os.path.isfile(file_path)
         parent = os.path.dirname(file_path)
         try:
