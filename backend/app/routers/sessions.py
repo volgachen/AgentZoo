@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 from app.db.interface import IAgentDatabase
 from app.db.deps import get_db
-from app.models.domain import Session, SessionStatus, MessageRole, AgentType
+from app.models.domain import Session, SessionStatus, MessageRole, AgentType, AgentTemplate
 from app.adapters.registry import AdapterRegistry, get_registry
 from app.adapters.claude_code import ClaudeCodeAdapter
 from app.adapters.openai_tool_use import OpenAIToolUseAdapter
@@ -35,6 +35,69 @@ class CreateSessionRequest(BaseModel):
 class PostMessageRequest(BaseModel):
     content: str
     from_session_id: str | None = None
+
+
+async def _build_runner(
+    session: Session,
+    agent: AgentTemplate,
+    db: IAgentDatabase,
+    registry: AdapterRegistry,
+) -> SessionRunner:
+    """Construct + start the adapter and its runner, register it, and replay any
+    persisted conversation. Shared by create_session (fresh, no history) and the
+    post-restart rehydration path (history restored from the DB). Raises
+    ValueError/RuntimeError on adapter start failure; the caller decides how to
+    surface that."""
+    if agent.agent_type == AgentType.CLAUDE_CODE:
+        adapter = ClaudeCodeAdapter(working_dir=session.working_dir, session_id=session.id)
+    elif agent.agent_type == AgentType.TOOL_USE:
+        adapter = OpenAIToolUseAdapter(
+            tool_names=agent.tool_names,
+            model=agent.openai_model,
+            base_url=agent.openai_base_url,
+            session_id=session.id,
+        )
+    else:
+        raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
+
+    await adapter.start(agent.system_prompt)
+
+    # Rebuild prior context so a session rehydrated after a restart isn't
+    # amnesiac. No-op for a fresh session (no rows) or adapters that don't
+    # override restore_history.
+    history = await db.get_messages(session.id)
+    if history:
+        await adapter.restore_history(history)
+
+    runner = SessionRunner(session.id, adapter, db)
+    await runner.start()
+    registry.register(session.id, runner)
+    return runner
+
+
+async def _get_or_rehydrate(
+    session: Session,
+    db: IAgentDatabase,
+    registry: AdapterRegistry,
+) -> SessionRunner | None:
+    """Return the live runner, rebuilding it from persisted state if the
+    in-memory registry lost it to a backend restart. Returns None when the
+    session can't be rehydrated (claude-code continuity isn't restored yet) so
+    callers fall back to the stub / 409."""
+    try:
+        return registry.get(session.id)
+    except KeyError:
+        pass
+    agent = await db.get_agent(session.agent_id)
+    if agent.agent_type != AgentType.TOOL_USE:
+        return None
+    logger.info("rehydrating runner for session=%s", session.id)
+    try:
+        return await _build_runner(session, agent, db, registry)
+    except (ValueError, RuntimeError):
+        logger.exception("rehydrate failed session=%s", session.id)
+        await db.update_session_status(session.id, SessionStatus.ERROR)
+        return None
 
 
 @router.post("", response_model=Session, status_code=201)
@@ -120,38 +183,13 @@ async def create_session(
             raise HTTPException(status_code=500, detail=f"write .env failed: {e}")
         logger.info("wrote .env to %s", env_path)
 
-    if agent.agent_type == AgentType.CLAUDE_CODE:
-        adapter = ClaudeCodeAdapter(working_dir=working_dir, session_id=session.id)
-        try:
-            await adapter.start(agent.system_prompt)
-        except RuntimeError as e:
-            logger.exception("ClaudeCodeAdapter start failed for session=%s", session.id)
-            await db.update_session_status(session.id, SessionStatus.ERROR)
-            raise HTTPException(status_code=500, detail=str(e))
-        runner = SessionRunner(session.id, adapter, db)
-        await runner.start()
-        registry.register(session.id, runner)
-        logger.info("registered ClaudeCodeAdapter runner for session=%s", session.id)
-    elif agent.agent_type == AgentType.TOOL_USE:
-        adapter = OpenAIToolUseAdapter(
-            tool_names=agent.tool_names,
-            model=agent.openai_model,
-            base_url=agent.openai_base_url,
-            session_id=session.id,
-        )
-        try:
-            await adapter.start(agent.system_prompt)
-        except (ValueError, RuntimeError) as e:
-            logger.exception("OpenAIToolUseAdapter start failed for session=%s", session.id)
-            await db.update_session_status(session.id, SessionStatus.ERROR)
-            raise HTTPException(status_code=500, detail=str(e))
-        runner = SessionRunner(session.id, adapter, db)
-        await runner.start()
-        registry.register(session.id, runner)
-        logger.info(
-            "registered OpenAIToolUseAdapter runner for session=%s tools=%s",
-            session.id, agent.tool_names,
-        )
+    try:
+        await _build_runner(session, agent, db, registry)
+    except (ValueError, RuntimeError) as e:
+        logger.exception("adapter start failed for session=%s", session.id)
+        await db.update_session_status(session.id, SessionStatus.ERROR)
+        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("registered runner for session=%s type=%s", session.id, agent.agent_type)
 
     await db.update_session_status(session.id, SessionStatus.RUNNING)
     return await db.get_session(session.id)
@@ -186,12 +224,11 @@ async def post_message(
     registry: AdapterRegistry = Depends(get_registry),
 ):
     try:
-        await db.get_session(session_id)
+        session = await db.get_session(session_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    try:
-        runner = registry.get(session_id)
-    except KeyError:
+    runner = await _get_or_rehydrate(session, db, registry)
+    if runner is None:
         raise HTTPException(status_code=409, detail="session has no live adapter")
     logger.info("HTTP submit session=%s len=%d from=%s",
                 session_id, len(body.content), body.from_session_id)
@@ -235,10 +272,9 @@ async def session_stream(
 
     await ws.send_text(json.dumps({"type": "session_state", "data": session.model_dump(mode="json")}))
 
-    try:
-        runner = registry.get(session_id)
-    except KeyError:
-        logger.warning("WS session=%s has no live runner (post-restart?)", session_id)
+    runner = await _get_or_rehydrate(session, db, registry)
+    if runner is None:
+        logger.warning("WS session=%s has no live runner (post-restart, stub)", session_id)
         await _stub_loop(ws, session_id, db)
         return
 

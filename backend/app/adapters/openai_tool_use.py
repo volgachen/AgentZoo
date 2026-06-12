@@ -4,6 +4,7 @@ import os
 from typing import AsyncGenerator
 from openai import AsyncOpenAI
 from app.adapters.base import BaseAgentAdapter, StreamEvent, StreamEventType
+from app.models.domain import Message, MessageRole
 import app.adapters.tools  # noqa: F401 — triggers tool registration
 from app.adapters.tools.registry import load_tools
 from app.adapters.tools.base import BaseTool
@@ -59,6 +60,94 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
 
     async def send(self, message: str) -> None:
         self._pending = message
+
+    async def restore_history(self, messages: list[Message]) -> None:
+        """Rebuild conversation context after a backend restart, using OpenAI's
+        native tool roles.
+
+        Persisted rows use our own vocabulary (user/agent/tool_call/tool) and we
+        never stored OpenAI's tool_call_id. The runner always writes each
+        TOOL_CALL immediately followed by its TOOL result, in order, so we
+        re-pair them by adjacency and synthesize a stable id — producing a valid
+        assistant(tool_calls) -> tool(tool_call_id) sequence the API accepts.
+        Two fidelity limits: tool results were truncated to _TOOL_RESULT_MAX when
+        persisted, and a turn interrupted before its result was stored gets a
+        placeholder response so the tool_call still has a match. The system
+        prompt seeded in start() is preserved (SYSTEM rows aren't persisted).
+        """
+        restored: list[dict] = []
+        i = 0
+        n = len(messages)
+        call_seq = 0
+        while i < n:
+            m = messages[i]
+            if m.role == MessageRole.USER:
+                restored.append({"role": "user", "content": m.content})
+                i += 1
+            elif m.role == MessageRole.AGENT:
+                restored.append({"role": "assistant", "content": m.content})
+                i += 1
+            elif m.role == MessageRole.TOOL_CALL:
+                name, arguments = self._parse_persisted_tool_call(m.content)
+                call_id = f"restored_call_{call_seq}"
+                call_seq += 1
+                restored.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": arguments},
+                    }],
+                })
+                # The matching result is the next row, unless the turn was
+                # interrupted before it was persisted — then synthesize one so
+                # the tool_call isn't left dangling (the API requires a response).
+                result = "[result not recorded]"
+                if i + 1 < n and messages[i + 1].role == MessageRole.TOOL:
+                    result = self._parse_persisted_tool_result(messages[i + 1].content)
+                    i += 1
+                restored.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": result,
+                })
+                i += 1
+            elif m.role == MessageRole.TOOL:
+                # Orphan result with no preceding call — can't attach a tool role
+                # without a matching id, so keep it as plain assistant context.
+                restored.append({
+                    "role": "assistant",
+                    "content": f"[previous tool result] {m.content}",
+                })
+                i += 1
+            else:
+                i += 1
+        self._messages.extend(restored)
+        logger.info(
+            "restored %d history rows -> %d context messages (total=%d)",
+            n, len(restored), len(self._messages),
+        )
+
+    @staticmethod
+    def _parse_persisted_tool_call(content: str) -> tuple[str, str]:
+        # TOOL_CALL rows store json.dumps({"name", "args"}); OpenAI wants the
+        # arguments back as a JSON string.
+        try:
+            obj = json.loads(content)
+            return obj.get("name", "unknown"), json.dumps(obj.get("args", {}))
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return "unknown", "{}"
+
+    @staticmethod
+    def _parse_persisted_tool_result(content: str) -> str:
+        # TOOL rows store json.dumps({"name", "result"}); fall back to the raw
+        # string if it isn't the expected shape.
+        try:
+            obj = json.loads(content)
+            return obj.get("result", content) if isinstance(obj, dict) else content
+        except json.JSONDecodeError:
+            return content
 
     async def stream(self) -> AsyncGenerator[StreamEvent, None]:
         if self._pending is None or self._client is None:
