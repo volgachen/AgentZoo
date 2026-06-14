@@ -12,6 +12,14 @@ _LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "tmp", "bas
 _DEFAULT_TIMEOUT = 120
 _DEFAULT_MAX_OUTPUT = 8192
 
+# CWD relay: each bash call spawns a fresh subshell, so a trailing `cd` would
+# normally evaporate before the next call. Like Claude Code's BashTool, we don't
+# keep a persistent shell — instead we capture `pwd` to a side file after each
+# command and feed it back as the cwd of the next one. This is POSIX-only: the
+# capture wrapper uses sh syntax (`$?`, `pwd`), which cmd.exe can't parse, so on
+# Windows we fall back to the static working_dir (no regression).
+_CWD_RELAY = os.name == "posix"
+
 
 def _log_path() -> str:
     os.makedirs(_LOG_DIR, exist_ok=True)
@@ -19,9 +27,58 @@ def _log_path() -> str:
     return os.path.abspath(os.path.join(_LOG_DIR, name))
 
 
+def _cwd_file() -> str:
+    os.makedirs(_LOG_DIR, exist_ok=True)
+    name = f"cwd-{int(time.time())}-{uuid.uuid4().hex[:8]}.txt"
+    return os.path.abspath(os.path.join(_LOG_DIR, name))
+
+
+def _wrap_with_cwd_capture(command: str, cwd_file: str) -> str:
+    """Append a `pwd` capture that records the post-command working directory to
+    a side file, without disturbing the command's stdout or exit code.
+
+    The original exit code is saved before `pwd` runs and re-raised via `exit`,
+    so the `[exit code: N]` header still reflects the user's command. `pwd` writes
+    to its own file (not stdout), so the returned output is unchanged.
+    """
+    quoted = cwd_file.replace('"', '\\"')
+    return (
+        f"{command}\n"
+        f"__az_rc=$?\n"
+        f'pwd > "{quoted}" 2>/dev/null || true\n'
+        f"exit $__az_rc\n"
+    )
+
+
+def _read_cwd_file(cwd_file: str) -> str | None:
+    """Read back the captured cwd, validate it's a real directory, and clean up.
+
+    Best-effort: a missing/empty/stale value just leaves the cwd unchanged.
+    """
+    try:
+        with open(cwd_file, encoding="utf-8") as f:
+            value = f.read().strip()
+    except OSError:
+        return None
+    finally:
+        try:
+            os.remove(cwd_file)
+        except OSError:
+            pass
+    if value and os.path.isdir(value):
+        return value
+    return None
+
+
 @register_tool
 class BashTool(BaseTool):
     name = "bash"
+    # Relayed working directory: advances when a command ends with a `cd`, so the
+    # next bash call resumes where the previous one left off. Initialized lazily
+    # from working_dir on first use. Persists for the lifetime of the tool
+    # instance (one per session), so it does not survive a backend restart — the
+    # session's static working_dir is the fallback.
+    _cwd: str | None = None
     description = (
         "Run a shell command on the host and return its combined stdout/stderr. "
         "Use timeout to bound runtime, max_output_length to cap returned text "
@@ -78,6 +135,11 @@ class BashTool(BaseTool):
             return await self._run_background(command)
         return await self._run_foreground(command, timeout, max_output_length)
 
+    def _effective_cwd(self) -> str | None:
+        """Where the next command runs: the relayed cwd if a prior `cd` advanced
+        it, else the session's static working_dir."""
+        return self._cwd or self.working_dir
+
     async def _run_background(self, command: str) -> str:
         path = _log_path()
         # Keep the file handle open for the lifetime of the child; the OS closes
@@ -88,7 +150,7 @@ class BashTool(BaseTool):
             stdout=log_file,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
-            cwd=self.working_dir,
+            cwd=self._effective_cwd(),
         )
         return (
             f"[Running in background] pid={proc.pid}\n"
@@ -98,11 +160,19 @@ class BashTool(BaseTool):
     async def _run_foreground(
         self, command: str, timeout: int, max_output_length: int
     ) -> str:
+        # CWD relay: wrap the command so it records its final directory to a side
+        # file, then read it back to advance self._cwd for the next call. Skipped
+        # on non-POSIX shells (cmd.exe can't parse the wrapper).
+        cwd_file = _cwd_file() if _CWD_RELAY else None
+        run_command = (
+            _wrap_with_cwd_capture(command, cwd_file) if cwd_file else command
+        )
+
         proc = await asyncio.create_subprocess_shell(
-            command,
+            run_command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            cwd=self.working_dir,
+            cwd=self._effective_cwd(),
         )
 
         try:
@@ -110,10 +180,17 @@ class BashTool(BaseTool):
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+            if cwd_file:
+                _read_cwd_file(cwd_file)  # discard result, just clean up
             return (
                 f"[Timed out] Command exceeded {timeout}s and was terminated:\n"
                 f"$ {command}"
             )
+
+        if cwd_file:
+            new_cwd = _read_cwd_file(cwd_file)
+            if new_cwd:
+                self._cwd = new_cwd
 
         output = stdout.decode("utf-8", errors="replace")
         header = f"[exit code: {proc.returncode}]\n"
