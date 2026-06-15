@@ -4,6 +4,7 @@ from app.adapters.tools import (  # noqa: F401
     arxiv_search,
     web_fetch,
     subagent,
+    list_subagents,
     bash,
     read,
     write,
