@@ -15,6 +15,8 @@ interface DirSelection {
   workingDir: string;
   templateDir: string | null;
   env: string | null;
+  additionalPrompt: string | null;
+  additionalPromptPath: string | null;
 }
 
 export default function AgentRegistry() {
@@ -62,6 +64,8 @@ export default function AgentRegistry() {
         sel?.workingDir ?? null,
         sel?.templateDir ?? null,
         sel?.env ?? null,
+        sel?.additionalPrompt ?? null,
+        sel?.additionalPromptPath ?? null,
       );
       setActive(sessionId);
       navigate(`/console/${sessionId}`);
@@ -169,6 +173,18 @@ export default function AgentRegistry() {
                       <div>
                         <span className="text-gray-500">.env:</span>{" "}
                         {sel.env.split("\n").filter((l) => l.trim()).length} line(s)
+                      </div>
+                    )}
+                    {sel.additionalPrompt && (
+                      <div>
+                        <span className="text-gray-500">+prompt:</span>{" "}
+                        {sel.additionalPrompt.length} char(s)
+                      </div>
+                    )}
+                    {sel.additionalPromptPath && (
+                      <div>
+                        <span className="text-gray-500">+prompt file:</span>{" "}
+                        {sel.additionalPromptPath}
                       </div>
                     )}
                   </div>

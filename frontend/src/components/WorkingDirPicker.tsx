@@ -11,6 +11,8 @@ interface Props {
     workingDir: string;
     templateDir: string | null;
     env: string | null;
+    additionalPrompt: string | null;
+    additionalPromptPath: string | null;
   }) => void;
 }
 
@@ -62,7 +64,7 @@ function PathList({
   onGoParent: () => void;
 }) {
   return (
-    <div className="flex flex-col flex-1 min-h-0 border border-gray-700 rounded-lg bg-gray-900">
+    <div className="flex flex-col flex-1 min-h-[14rem] border border-gray-700 rounded-lg bg-gray-900">
       <div className="px-3 py-2 border-b border-gray-700 flex items-center gap-2 text-xs">
         <button
           onClick={onGoParent}
@@ -111,6 +113,8 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [targetDir, setTargetDir] = useState("");
   const [envText, setEnvText] = useState("");
+  const [promptText, setPromptText] = useState("");
+  const [promptPath, setPromptPath] = useState("");
 
   const existing = useBrowser("browse", open && mode === "existing");
   const templates = useBrowser("templates", open && mode === "template");
@@ -121,6 +125,8 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
       setSelectedTemplate(null);
       setTargetDir("");
       setEnvText("");
+      setPromptText("");
+      setPromptPath("");
       setMode("existing");
     }
   }, [open]);
@@ -134,19 +140,27 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
 
   const handleConfirm = () => {
     const env = envText.trim() ? envText : null;
+    const additionalPrompt = promptText.trim() ? promptText : null;
+    const additionalPromptPath = promptPath.trim() ? promptPath.trim() : null;
     if (mode === "existing") {
       const dir = selectedExisting ?? existing.data?.path ?? "";
       if (!dir) return;
-      onConfirm({ workingDir: dir, templateDir: null, env });
+      onConfirm({ workingDir: dir, templateDir: null, env, additionalPrompt, additionalPromptPath });
     } else {
       if (!selectedTemplate || !targetDir.trim()) return;
-      onConfirm({ workingDir: targetDir.trim(), templateDir: selectedTemplate, env });
+      onConfirm({
+        workingDir: targetDir.trim(),
+        templateDir: selectedTemplate,
+        env,
+        additionalPrompt,
+        additionalPromptPath,
+      });
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-3xl h-[32rem] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col">
+      <div className="w-full max-w-3xl h-[42rem] max-h-[92vh] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col">
         <div className="px-5 py-3 border-b border-gray-700 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-white">Choose working directory</h2>
           <button
@@ -174,7 +188,7 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
           ))}
         </div>
 
-        <div className="flex-1 min-h-0 px-5 pb-5 pt-2 flex flex-col gap-3">
+        <div className="flex-1 min-h-0 px-5 pb-5 pt-2 flex flex-col gap-3 overflow-y-auto">
           {mode === "existing" ? (
             <>
               <p className="text-xs text-gray-500">
@@ -236,6 +250,33 @@ export default function WorkingDirPicker({ open, onClose, onConfirm }: Props) {
               placeholder={`GATEWAY_URL=http://localhost:12598\nWIKI_SESSION_ID=<uuid>`}
               value={envText}
               onChange={(e) => setEnvText(e.target.value)}
+            />
+          </label>
+
+          <label className="text-xs text-gray-400 flex flex-col gap-1">
+            <span>
+              Additional system prompt (optional) — appended after the agent's base
+              system prompt
+            </span>
+            <textarea
+              className="bg-gray-950 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200 placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none h-20"
+              placeholder={`Focus on Python performance optimization.\nPrefer pytest over unittest.`}
+              value={promptText}
+              onChange={(e) => setPromptText(e.target.value)}
+            />
+          </label>
+
+          <label className="text-xs text-gray-400 flex flex-col gap-1">
+            <span>
+              Additional prompt file path (optional) — server-side path; contents
+              appended after the inline text above
+            </span>
+            <input
+              type="text"
+              className="bg-gray-950 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200 placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500"
+              placeholder="/path/to/extra-prompt.md"
+              value={promptPath}
+              onChange={(e) => setPromptPath(e.target.value)}
             />
           </label>
         </div>
