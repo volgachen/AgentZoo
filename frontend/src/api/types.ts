@@ -35,6 +35,8 @@ export interface Session {
   agent_id: string;
   working_dir: string | null;
   parent_session_id: string | null;
+  additional_prompt: string | null;
+  additional_prompt_path: string | null;
   status: SessionStatus;
   created_at: string;
   updated_at: string;

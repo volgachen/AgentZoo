@@ -47,6 +47,14 @@ class Session(BaseModel):
     # session was created directly by an operator. Used to render the agent
     # derivation tree and to let the child report results back to its parent.
     parent_session_id: Optional[str] = None
+    # Per-session add-ons to the AgentTemplate's base system_prompt. Persisted so
+    # a session rehydrated after a backend restart sees the exact same effective
+    # prompt it was launched with. The router applies them at adapter.start()
+    # time; the database itself just stores them. additional_prompt is inline
+    # text; additional_prompt_path is a server-side path read at start (and
+    # re-read on rehydrate).
+    additional_prompt: Optional[str] = None
+    additional_prompt_path: Optional[str] = None
     status: SessionStatus = SessionStatus.INITIALIZING
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

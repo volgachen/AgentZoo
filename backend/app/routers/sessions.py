@@ -114,7 +114,17 @@ async def _get_or_rehydrate(
         return None
     logger.info("rehydrating runner for session=%s", session.id)
     try:
-        return await _build_runner(session, agent, db, registry)
+        # Replay the per-session prompt overrides that were stored on the
+        # session row when it was first created, so the rehydrated adapter
+        # sees the same effective system prompt it had pre-restart. Inline
+        # text is restored verbatim; the path is re-read from disk (its
+        # contents may have changed since launch — that's intentional, the
+        # path is the contract, not a snapshot).
+        return await _build_runner(
+            session, agent, db, registry,
+            additional_prompt=session.additional_prompt,
+            additional_prompt_path=session.additional_prompt_path,
+        )
     except (ValueError, RuntimeError):
         logger.exception("rehydrate failed session=%s", session.id)
         await db.update_session_status(session.id, SessionStatus.ERROR)
@@ -181,6 +191,8 @@ async def create_session(
         body.agent_id,
         working_dir=working_dir,
         parent_session_id=body.parent_session_id,
+        additional_prompt=body.additional_prompt,
+        additional_prompt_path=body.additional_prompt_path,
     )
     logger.debug("session created id=%s status=%s", session.id, session.status)
 

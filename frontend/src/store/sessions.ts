@@ -165,6 +165,8 @@ export const useStore = create<Store>((set, get) => {
                     agent_id: "",
                     working_dir: null,
                     parent_session_id: null,
+                    additional_prompt: null,
+                    additional_prompt_path: null,
                     status: "RUNNING",
                     created_at: "",
                     updated_at: "",

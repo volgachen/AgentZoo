@@ -124,12 +124,16 @@ class MockMemoryDatabase(IAgentDatabase):
         working_dir: str | None = None,
         *,
         parent_session_id: str | None = None,
+        additional_prompt: str | None = None,
+        additional_prompt_path: str | None = None,
     ) -> Session:
         await self.get_agent(agent_id)  # validate agent exists
         session = Session(
             agent_id=agent_id,
             working_dir=working_dir,
             parent_session_id=parent_session_id,
+            additional_prompt=additional_prompt,
+            additional_prompt_path=additional_prompt_path,
         )
         self._sessions[session.id] = session
         self._messages[session.id] = []

@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     agent_id          VARCHAR(36)   NOT NULL,
     working_dir       VARCHAR(1000) DEFAULT NULL,
     parent_session_id VARCHAR(36)   DEFAULT NULL,
+    additional_prompt LONGTEXT      DEFAULT NULL,
+    additional_prompt_path VARCHAR(1000) DEFAULT NULL,
     status            VARCHAR(30)   NOT NULL DEFAULT 'INITIALIZING',
     created_at        DATETIME(3)   NOT NULL,
     updated_at        DATETIME(3)   NOT NULL,
@@ -129,7 +131,7 @@ _SEED_AGENTS: list[dict[str, Any]] = [
             "web_search", "web_fetch", "arxiv_search",
             "session_send", "write", "read", "edit",
         ],
-        "openai_model": "gpt-5.4",
+        "openai_model": "gpt-5.5",
         "openai_base_url": None,
     },
     {
@@ -166,7 +168,7 @@ _SEED_AGENTS: list[dict[str, Any]] = [
             "web_search", "web_fetch", "arxiv_search",
             "session_send", "write", "read", "edit",
         ],
-        "openai_model": "gpt-5.4",
+        "openai_model": "gpt-5.5",
         "openai_base_url": None,
     },
     {
@@ -205,6 +207,11 @@ def _row_to_session(row: dict[str, Any]) -> Session:
         agent_id=row["agent_id"],
         working_dir=row["working_dir"],
         parent_session_id=row["parent_session_id"],
+        # `.get` instead of `[]` so a database that hasn't had the additional_*
+        # columns ALTER'd in yet still loads. Operators run that ALTER manually
+        # (see CLAUDE.md / migration notes).
+        additional_prompt=row.get("additional_prompt"),
+        additional_prompt_path=row.get("additional_prompt_path"),
         status=SessionStatus(row["status"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -417,25 +424,32 @@ class MySqlDatabase(IAgentDatabase):
         working_dir: str | None = None,
         *,
         parent_session_id: str | None = None,
+        additional_prompt: str | None = None,
+        additional_prompt_path: str | None = None,
     ) -> Session:
         await self.get_agent(agent_id)
         session = Session(
             agent_id=agent_id,
             working_dir=working_dir,
             parent_session_id=parent_session_id,
+            additional_prompt=additional_prompt,
+            additional_prompt_path=additional_prompt_path,
         )
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """INSERT INTO sessions
                        (id, agent_id, working_dir, parent_session_id,
+                        additional_prompt, additional_prompt_path,
                         status, created_at, updated_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         session.id,
                         session.agent_id,
                         session.working_dir,
                         session.parent_session_id,
+                        session.additional_prompt,
+                        session.additional_prompt_path,
                         session.status.value,
                         session.created_at,
                         session.updated_at,

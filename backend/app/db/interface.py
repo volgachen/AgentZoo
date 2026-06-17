@@ -43,6 +43,8 @@ class IAgentDatabase(ABC):
         working_dir: str | None = None,
         *,
         parent_session_id: str | None = None,
+        additional_prompt: str | None = None,
+        additional_prompt_path: str | None = None,
     ) -> Session: pass
 
     @abstractmethod
