@@ -30,6 +30,12 @@ class CreateSessionRequest(BaseModel):
     # on the new Session and injected into its .env as PARENT_SESSION_ID so the
     # child can report results back to its parent.
     parent_session_id: str | None = None
+    # Additional system prompt content appended to the agent's base system_prompt.
+    # Applied before additional_prompt_path.
+    additional_prompt: str | None = None
+    # Path to a file containing additional system prompt content. The file is
+    # read and appended to the agent's base system_prompt (after additional_prompt).
+    additional_prompt_path: str | None = None
 
 
 class PostMessageRequest(BaseModel):
@@ -42,6 +48,8 @@ async def _build_runner(
     agent: AgentTemplate,
     db: IAgentDatabase,
     registry: AdapterRegistry,
+    additional_prompt: str | None = None,
+    additional_prompt_path: str | None = None,
 ) -> SessionRunner:
     """Construct + start the adapter and its runner, register it, and replay any
     persisted conversation. Shared by create_session (fresh, no history) and the
@@ -61,7 +69,19 @@ async def _build_runner(
     else:
         raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
 
-    await adapter.start(agent.system_prompt)
+    # Build the final system prompt by appending additional content
+    system_prompt = agent.system_prompt
+    if additional_prompt:
+        system_prompt = system_prompt + "\n\n" + additional_prompt
+    if additional_prompt_path:
+        try:
+            extra_content = Path(additional_prompt_path).read_text(encoding="utf-8")
+            system_prompt = system_prompt + "\n\n" + extra_content
+        except (OSError, UnicodeDecodeError) as e:
+            logger.exception("failed to read additional_prompt_path=%s", additional_prompt_path)
+            raise ValueError(f"failed to read additional system prompt from {additional_prompt_path}: {e}")
+
+    await adapter.start(system_prompt)
 
     # Rebuild prior context so a session rehydrated after a restart isn't
     # amnesiac. No-op for a fresh session (no rows) or adapters that don't
@@ -217,7 +237,11 @@ async def create_session(
             logger.info("merged .env at %s (preserved %d existing line(s))", env_path, len(kept))
 
     try:
-        await _build_runner(session, agent, db, registry)
+        await _build_runner(
+            session, agent, db, registry,
+            additional_prompt=body.additional_prompt,
+            additional_prompt_path=body.additional_prompt_path,
+        )
     except (ValueError, RuntimeError) as e:
         logger.exception("adapter start failed for session=%s", session.id)
         await db.update_session_status(session.id, SessionStatus.ERROR)

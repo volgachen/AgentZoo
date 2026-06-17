@@ -39,6 +39,8 @@ interface Store {
     workingDir?: string | null,
     templateDir?: string | null,
     env?: string | null,
+    additionalPrompt?: string | null,
+    additionalPromptPath?: string | null,
   ) => Promise<string>;
   sendMessage: (sessionId: string, content: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
@@ -202,8 +204,8 @@ export const useStore = create<Store>((set, get) => {
       });
     },
 
-    launchSession: async (agentId, workingDir = null, templateDir = null, env = null) => {
-      const session = await api.sessions.create(agentId, workingDir, templateDir, env);
+    launchSession: async (agentId, workingDir = null, templateDir = null, env = null, additionalPrompt = null, additionalPromptPath = null) => {
+      const session = await api.sessions.create(agentId, workingDir, templateDir, env, additionalPrompt, additionalPromptPath);
       const socket = attachSocket(session.id);
 
       set((s) => ({

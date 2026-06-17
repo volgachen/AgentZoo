@@ -78,10 +78,12 @@ export const api = {
       working_dir: string | null = null,
       template_dir: string | null = null,
       env: string | null = null,
+      additional_prompt: string | null = null,
+      additional_prompt_path: string | null = null,
     ) =>
       request<Session>("/sessions", {
         method: "POST",
-        body: JSON.stringify({ agent_id, working_dir, template_dir, env }),
+        body: JSON.stringify({ agent_id, working_dir, template_dir, env, additional_prompt, additional_prompt_path }),
       }),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     list: () => request<Session[]>("/sessions"),
