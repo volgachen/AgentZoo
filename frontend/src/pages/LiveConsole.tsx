@@ -15,45 +15,94 @@ const EVENT_STYLE: Record<string, string> = {
   user: "text-indigo-300",
 };
 
-// tool_call data is {name,args}; tool_result data is {name,result}. Render them
-// readably instead of dumping raw JSON.
-function formatToolData(type: string, raw: string): string {
+// Build a one-line summary + a fully-formatted block for tool events. The raw
+// payload is JSON: tool_call = {name,args}, tool_result = {name,result}.
+function formatToolData(
+  type: string,
+  raw: string,
+): { summary: string; full: string } {
   try {
     const obj = JSON.parse(raw);
     if (type === "tool_call") {
-      return `${obj.name}(${JSON.stringify(obj.args ?? {})})`;
+      const args = obj.args ?? {};
+      const argsLine = JSON.stringify(args);
+      const argsBlock = JSON.stringify(args, null, 2);
+      return {
+        summary: `${obj.name}(${argsLine})`,
+        full: `${obj.name}(\n${argsBlock}\n)`,
+      };
     }
     if (type === "tool_result") {
-      return `${obj.name} → ${typeof obj.result === "string" ? obj.result : JSON.stringify(obj.result)}`;
+      const result = obj.result;
+      const resultLine =
+        typeof result === "string" ? result : JSON.stringify(result);
+      const resultBlock =
+        typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      return {
+        summary: `${obj.name} → ${resultLine}`,
+        full: `${obj.name} →\n${resultBlock}`,
+      };
     }
   } catch {
     // fall through to raw
   }
-  return raw;
+  return { summary: raw, full: raw };
+}
+
+// Collapse multi-line text to a single line with a visible ↵ marker so the user
+// can tell something was truncated.
+function toOneLine(s: string, max = 200): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > max ? flat.slice(0, max) + "…" : flat;
+}
+
+function ToolEventLine({ event }: { event: StreamEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const style = EVENT_STYLE[event.type] ?? "text-gray-300";
+  const prefix = event.type === "tool_call" ? "⚙ " : "↩ ";
+  const { summary, full } = formatToolData(event.type, event.data);
+  const oneLine = toOneLine(summary);
+  const chevron = expanded ? "▾" : "▸";
+  return (
+    <div className={`text-left font-mono text-sm ${style}`}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left flex items-start gap-1 hover:bg-gray-800/40 rounded px-1 -mx-1 cursor-pointer"
+        title={expanded ? "Collapse" : "Expand"}
+      >
+        <span className="text-gray-500 select-none">{chevron}</span>
+        <span className="flex-1 truncate">
+          {prefix}
+          {oneLine}
+        </span>
+      </button>
+      {expanded && (
+        <pre className="mt-1 ml-4 px-2 py-1.5 bg-gray-950/60 border border-gray-800 rounded whitespace-pre-wrap break-all text-xs text-gray-300">
+          {full}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 function EventLine({ event }: { event: StreamEvent }) {
+  if (event.type === "tool_call" || event.type === "tool_result") {
+    return <ToolEventLine event={event} />;
+  }
   const style = EVENT_STYLE[event.type] ?? "text-gray-300";
   const prefix =
-    event.type === "tool_call"
-      ? "⚙ "
-      : event.type === "tool_result"
-        ? "↩ "
-        : event.type === "status"
-          ? "● "
-          : event.type === "error"
-            ? "✗ "
-            : event.type === "done"
-              ? "✓ "
-              : event.type === "user"
-                ? "❯ "
-                : "";
+    event.type === "status"
+      ? "● "
+      : event.type === "error"
+        ? "✗ "
+        : event.type === "done"
+          ? "✓ "
+          : event.type === "user"
+            ? "❯ "
+            : "";
   const body =
-    event.type === "tool_call" || event.type === "tool_result"
-      ? formatToolData(event.type, event.data)
-      : typeof event.data === "string"
-        ? event.data
-        : JSON.stringify(event.data);
+    typeof event.data === "string" ? event.data : JSON.stringify(event.data);
   return (
     <div className={`text-left font-mono text-sm whitespace-pre-wrap break-all ${style}`}>
       {prefix}
