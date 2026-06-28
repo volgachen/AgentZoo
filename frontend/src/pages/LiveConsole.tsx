@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useStore } from "../store/sessions";
 import type { StreamEvent } from "../api/types";
+import TaskListPanel from "../components/TaskListPanel";
+import SubAgentListPanel from "../components/SubAgentListPanel";
 
 const EVENT_STYLE: Record<string, string> = {
   text: "text-gray-200",
@@ -117,10 +119,40 @@ export default function LiveConsole() {
   const sessions = useStore((s) => s.sessions);
   const sendMessage = useStore((s) => s.sendMessage);
   const openSession = useStore((s) => s.openSession);
+  const fetchTasks = useStore((s) => s.fetchTasks);
+  const hydrateSessions = useStore((s) => s.hydrateSessions);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const entry = sessionId ? sessions[sessionId] : undefined;
+
+  // Child sessions (sub-agents) are just sessions whose parent is this one.
+  // They land in the store via hydrateSessions, so we filter the live map.
+  const children = Object.values(sessions)
+    .map((e) => e.session)
+    .filter((s) => s.parent_session_id === sessionId);
+
+  const eventCount = entry?.events.length ?? 0;
+
+  // Reactive refresh: tasks only change via task_* tool calls, which surface as
+  // stream events — so refetch tasks (and re-hydrate to catch newly spawned
+  // sub-agents) whenever the event count moves.
+  useEffect(() => {
+    if (!sessionId) return;
+    fetchTasks(sessionId).catch(() => {});
+    hydrateSessions().catch(() => {});
+  }, [sessionId, eventCount, fetchTasks, hydrateSessions]);
+
+  // Backup poll: covers changes that emit no event on this socket — e.g. a
+  // sub-agent spawned from another tab, or its status flipping as it works.
+  useEffect(() => {
+    if (!sessionId) return;
+    const timer = setInterval(() => {
+      fetchTasks(sessionId).catch(() => {});
+      hydrateSessions().catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [sessionId, fetchTasks, hydrateSessions]);
 
   // Backfill history + attach a live socket when viewing a session we didn't
   // launch in this tab (e.g. subagent-spawned). No-op if already live.
@@ -202,15 +234,31 @@ export default function LiveConsole() {
         </div>
       </div>
 
-      {/* Event log */}
-      <div className="flex-1 bg-gray-900 rounded-xl border border-gray-700 p-4 overflow-y-auto flex flex-col gap-1 min-h-0">
-        {events.length === 0 && (
-          <p className="text-gray-600 text-sm font-mono">Waiting for output…</p>
-        )}
-        {events.map((ev, i) => (
-          <EventLine key={i} event={ev} />
-        ))}
-        <div ref={bottomRef} />
+      {/* Body: event log + status sidebar */}
+      <div className="flex-1 flex gap-3 min-h-0">
+        {/* Event log */}
+        <div className="flex-1 bg-gray-900 rounded-xl border border-gray-700 p-4 overflow-y-auto flex flex-col gap-1 min-h-0">
+          {events.length === 0 && (
+            <p className="text-gray-600 text-sm font-mono">Waiting for output…</p>
+          )}
+          {events.map((ev, i) => (
+            <EventLine key={i} event={ev} />
+          ))}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Status sidebar: tasks + sub-agents (hidden on narrow screens) */}
+        <aside className="hidden lg:flex w-80 shrink-0 flex-col gap-3 min-h-0">
+          <div className="flex-1 min-h-0 bg-gray-900 rounded-xl border border-gray-700 p-3 flex flex-col">
+            <TaskListPanel tasks={entry.tasks} />
+          </div>
+          <div className="flex-1 min-h-0 bg-gray-900 rounded-xl border border-gray-700 p-3 flex flex-col">
+            <SubAgentListPanel
+              agents={children}
+              onOpen={(id) => navigate(`/console/${id}`)}
+            />
+          </div>
+        </aside>
       </div>
 
       {/* Input */}

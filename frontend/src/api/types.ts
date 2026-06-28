@@ -55,6 +55,25 @@ export interface StreamEvent {
   data: string;
 }
 
+export type TaskStatus = "pending" | "in_progress" | "completed";
+
+// Mirror of backend app/models/domain.py::Task. The id is a per-list monotonic
+// integer rendered as a string ("1", "2"); task_list_id is the session id.
+export interface Task {
+  id: string;
+  task_list_id: string;
+  subject: string;
+  description: string;
+  active_form: string | null;
+  owner: string | null;
+  status: TaskStatus;
+  blocks: string[];
+  blocked_by: string[];
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type PluginStatus = "stopped" | "running" | "exited" | "errored";
 
 export interface Plugin {

@@ -5,6 +5,7 @@ import type {
   Message,
   Plugin,
   PluginLogLine,
+  Task,
 } from "./types";
 
 // Use the same host the browser connected to, so the app works on any machine in the LAN.
@@ -88,6 +89,7 @@ export const api = {
     get: (id: string) => request<Session>(`/sessions/${id}`),
     list: () => request<Session[]>("/sessions"),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),
+    tasks: (id: string) => request<Task[]>(`/sessions/${id}/tasks`),
     delete: (id: string) =>
       request<void>(`/sessions/${id}`, { method: "DELETE" }),
   },

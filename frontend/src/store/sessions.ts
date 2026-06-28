@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Message, Session, StreamEvent } from "../api/types";
+import type { Message, Session, StreamEvent, Task } from "../api/types";
 import { api, createSessionSocket } from "../api/client";
 
 interface SessionEntry {
@@ -7,6 +7,7 @@ interface SessionEntry {
   events: StreamEvent[];
   socket: WebSocket | null;
   generating: boolean;
+  tasks: Task[];
 }
 
 // Map a persisted Message into the StreamEvent shape the console renders, so
@@ -45,6 +46,7 @@ interface Store {
   sendMessage: (sessionId: string, content: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
   refreshSession: (sessionId: string) => Promise<void>;
+  fetchTasks: (sessionId: string) => Promise<void>;
 }
 
 export const useStore = create<Store>((set, get) => {
@@ -123,7 +125,7 @@ export const useStore = create<Store>((set, get) => {
           const existing = next[session.id];
           next[session.id] = existing
             ? { ...existing, session }
-            : { session, events: [], socket: null, generating: false };
+            : { session, events: [], socket: null, generating: false, tasks: [] };
         }
         return { sessions: next };
       });
@@ -174,6 +176,7 @@ export const useStore = create<Store>((set, get) => {
                   events: [],
                   socket,
                   generating: false,
+                  tasks: [],
                 },
           },
         };
@@ -218,6 +221,7 @@ export const useStore = create<Store>((set, get) => {
             events: [],
             socket,
             generating: false,
+            tasks: [],
           },
         },
       }));
@@ -265,6 +269,22 @@ export const useStore = create<Store>((set, get) => {
         if (!entry) return s;
         return {
           sessions: { ...s.sessions, [sessionId]: { ...entry, session } },
+        };
+      });
+    },
+
+    // Refetch the session's task list (task_list_id == session id). Called
+    // reactively when new stream events arrive, since task_* tool calls — the
+    // only thing that mutates tasks — surface as those events. No-op if we're
+    // not tracking the session.
+    fetchTasks: async (sessionId) => {
+      if (!get().sessions[sessionId]) return;
+      const tasks = await api.sessions.tasks(sessionId);
+      set((s) => {
+        const entry = s.sessions[sessionId];
+        if (!entry) return s;
+        return {
+          sessions: { ...s.sessions, [sessionId]: { ...entry, tasks } },
         };
       });
     },
