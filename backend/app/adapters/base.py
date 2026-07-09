@@ -11,6 +11,10 @@ class StreamEventType(str, Enum):
     USER = "user"
     TEXT = "text"
     TOOL_CALL = "tool_call"
+    # Emitted before a tool that isn't auto-approved runs; the adapter blocks on
+    # a human decision routed back via resolve_decision. data is JSON
+    # {call_id, name, args}.
+    TOOL_CONFIRM = "tool_confirm"
     TOOL_RESULT = "tool_result"
     STATUS = "status"
     ERROR = "error"
@@ -54,6 +58,16 @@ class BaseAgentAdapter(ABC):
         in-memory runner/adapter is gone but the DB rows survive). Default is a
         no-op; adapters that keep conversation history in process memory (e.g.
         OpenAI tool-use) override this so a resumed session isn't amnesiac.
+        """
+        return
+
+    async def resolve_decision(self, call_id: str, approved: bool) -> None:
+        """Resolve a pending tool-confirm request (see TOOL_CONFIRM).
+
+        Called by the runner when a human approves/denies a tool call the
+        adapter is blocked on. Default is a no-op — adapters that don't gate
+        tools (e.g. Claude Code, whose tools run in the CLI subprocess with its
+        own permission flow) simply ignore it.
         """
         return
 

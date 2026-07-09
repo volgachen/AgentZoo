@@ -8,6 +8,7 @@ import SubAgentListPanel from "../components/SubAgentListPanel";
 const EVENT_STYLE: Record<string, string> = {
   text: "text-gray-200",
   tool_call: "text-yellow-400",
+  tool_confirm: "text-orange-400",
   tool_result: "text-amber-300",
   status: "text-blue-400",
   error: "text-red-400",
@@ -25,7 +26,7 @@ function formatToolData(
 ): { summary: string; full: string } {
   try {
     const obj = JSON.parse(raw);
-    if (type === "tool_call") {
+    if (type === "tool_call" || type === "tool_confirm") {
       const args = obj.args ?? {};
       const argsLine = JSON.stringify(args);
       const argsBlock = JSON.stringify(args, null, 2);
@@ -61,7 +62,8 @@ function toOneLine(s: string, max = 200): string {
 function ToolEventLine({ event }: { event: StreamEvent }) {
   const [expanded, setExpanded] = useState(false);
   const style = EVENT_STYLE[event.type] ?? "text-gray-300";
-  const prefix = event.type === "tool_call" ? "⚙ " : "↩ ";
+  const prefix =
+    event.type === "tool_call" ? "⚙ " : event.type === "tool_confirm" ? "⚠ " : "↩ ";
   const { summary, full } = formatToolData(event.type, event.data);
   const oneLine = toOneLine(summary);
   const chevron = expanded ? "▾" : "▸";
@@ -89,7 +91,11 @@ function ToolEventLine({ event }: { event: StreamEvent }) {
 }
 
 function EventLine({ event }: { event: StreamEvent }) {
-  if (event.type === "tool_call" || event.type === "tool_result") {
+  if (
+    event.type === "tool_call" ||
+    event.type === "tool_confirm" ||
+    event.type === "tool_result"
+  ) {
     return <ToolEventLine event={event} />;
   }
   const style = EVENT_STYLE[event.type] ?? "text-gray-300";
@@ -118,6 +124,7 @@ export default function LiveConsole() {
   const navigate = useNavigate();
   const sessions = useStore((s) => s.sessions);
   const sendMessage = useStore((s) => s.sendMessage);
+  const resolveConfirm = useStore((s) => s.resolveConfirm);
   const openSession = useStore((s) => s.openSession);
   const fetchTasks = useStore((s) => s.fetchTasks);
   const hydrateSessions = useStore((s) => s.hydrateSessions);
@@ -224,9 +231,11 @@ export default function LiveConsole() {
                 ? "bg-green-900 text-green-300"
                 : session.status === "ERROR"
                   ? "bg-red-900 text-red-300"
-                  : session.status === "WAITING_USER"
-                    ? "bg-blue-900 text-blue-300"
-                    : "bg-gray-700 text-gray-400"
+                  : session.status === "WAITING_CONFIRM"
+                    ? "bg-orange-900 text-orange-300"
+                    : session.status === "WAITING_USER"
+                      ? "bg-blue-900 text-blue-300"
+                      : "bg-gray-700 text-gray-400"
             }`}
           >
             {session.status}
@@ -260,6 +269,39 @@ export default function LiveConsole() {
           </div>
         </aside>
       </div>
+
+      {/* Pending tool confirmations */}
+      {entry.pendingConfirms.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {entry.pendingConfirms.map((pc) => (
+            <div
+              key={pc.call_id}
+              className="flex items-center gap-3 bg-orange-950/40 border border-orange-800/60 rounded-lg px-3 py-2"
+            >
+              <span className="text-orange-300 text-sm shrink-0">⚠ Approve tool</span>
+              <code className="flex-1 min-w-0 truncate font-mono text-xs text-orange-200">
+                {pc.name}({toOneLine(JSON.stringify(pc.args ?? {}), 120)})
+              </code>
+              <button
+                onClick={() =>
+                  sessionId && resolveConfirm(sessionId, pc.call_id, true)
+                }
+                className="px-3 py-1 rounded-md bg-green-700 hover:bg-green-600 text-white text-xs font-medium shrink-0"
+              >
+                Allow
+              </button>
+              <button
+                onClick={() =>
+                  sessionId && resolveConfirm(sessionId, pc.call_id, false)
+                }
+                className="px-3 py-1 rounded-md bg-red-800 hover:bg-red-700 text-white text-xs font-medium shrink-0"
+              >
+                Deny
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Input */}
       <div className="flex gap-2">

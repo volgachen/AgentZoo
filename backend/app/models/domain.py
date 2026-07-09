@@ -9,6 +9,10 @@ class SessionStatus(str, Enum):
     INITIALIZING = "INITIALIZING"
     RUNNING = "RUNNING"
     WAITING_USER = "WAITING_USER"
+    # A turn is blocked awaiting a human decision on a tool call (see
+    # StreamEventType.TOOL_CONFIRM). Distinct from WAITING_USER, which means the
+    # turn finished and the agent is idle.
+    WAITING_CONFIRM = "WAITING_CONFIRM"
     COMPLETED = "COMPLETED"
     ERROR = "ERROR"
 
@@ -34,6 +38,10 @@ class AgentTemplate(BaseModel):
     system_prompt: str
     # tool_use agent config
     tool_names: list[str] = Field(default_factory=list)
+    # Tool names that run without a human confirm. Any tool NOT listed here
+    # triggers a TOOL_CONFIRM gate before it executes. Empty list = every tool
+    # requires confirmation. Only honored by the tool_use adapter.
+    auto_approve_tools: list[str] = Field(default_factory=list)
     openai_model: str = "gpt-4o"
     openai_base_url: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

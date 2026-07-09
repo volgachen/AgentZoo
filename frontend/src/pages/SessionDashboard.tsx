@@ -17,6 +17,7 @@ const STATUS_STYLE: Record<SessionStatus, string> = {
   INITIALIZING: "bg-yellow-900 text-yellow-300",
   RUNNING: "bg-green-900 text-green-300",
   WAITING_USER: "bg-blue-900 text-blue-300",
+  WAITING_CONFIRM: "bg-orange-900 text-orange-300",
   COMPLETED: "bg-gray-700 text-gray-400",
   ERROR: "bg-red-900 text-red-300",
 };

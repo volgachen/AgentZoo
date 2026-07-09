@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS agents (
     agent_type     VARCHAR(50)   NOT NULL,
     system_prompt  TEXT          NOT NULL,
     tool_names     JSON          NOT NULL,
+    auto_approve_tools JSON      DEFAULT NULL,
     openai_model   VARCHAR(100)  NOT NULL DEFAULT 'gpt-4o',
     openai_base_url VARCHAR(500) DEFAULT NULL,
     created_at     DATETIME(3)   NOT NULL
@@ -131,6 +132,8 @@ _SEED_AGENTS: list[dict[str, Any]] = [
             "web_search", "web_fetch", "arxiv_search",
             "session_send", "write", "read", "edit",
         ],
+        # Read-only tools run without asking; write/edit/session_send are gated.
+        "auto_approve_tools": ["web_search", "web_fetch", "arxiv_search", "read"],
         "openai_model": "gpt-5.5",
         "openai_base_url": None,
     },
@@ -188,6 +191,10 @@ def _row_to_agent(row: dict[str, Any]) -> AgentTemplate:
     tool_names = row["tool_names"]
     if isinstance(tool_names, str):
         tool_names = json.loads(tool_names)
+    # `.get` so a database not yet ALTER'd with auto_approve_tools still loads.
+    auto_approve = row.get("auto_approve_tools")
+    if isinstance(auto_approve, str):
+        auto_approve = json.loads(auto_approve)
     return AgentTemplate(
         id=row["id"],
         name=row["name"],
@@ -195,6 +202,7 @@ def _row_to_agent(row: dict[str, Any]) -> AgentTemplate:
         agent_type=AgentType(row["agent_type"]),
         system_prompt=row["system_prompt"],
         tool_names=tool_names,
+        auto_approve_tools=auto_approve or [],
         openai_model=row["openai_model"],
         openai_base_url=row["openai_base_url"],
         created_at=row["created_at"],
@@ -314,8 +322,8 @@ class MySqlDatabase(IAgentDatabase):
                         await cur.execute(
                         """INSERT IGNORE INTO agents
                            (id, name, description, agent_type, system_prompt,
-                            tool_names, openai_model, openai_base_url, created_at)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                            tool_names, auto_approve_tools, openai_model, openai_base_url, created_at)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                         (
                             agent["id"],
                             agent["name"],
@@ -323,6 +331,7 @@ class MySqlDatabase(IAgentDatabase):
                             agent["agent_type"],
                             agent["system_prompt"],
                             json.dumps(agent["tool_names"]),
+                            json.dumps(agent.get("auto_approve_tools", [])),
                             agent["openai_model"],
                             agent["openai_base_url"],
                             now,
@@ -355,8 +364,8 @@ class MySqlDatabase(IAgentDatabase):
                 await cur.execute(
                     """INSERT INTO agents
                        (id, name, description, agent_type, system_prompt,
-                        tool_names, openai_model, openai_base_url, created_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        tool_names, auto_approve_tools, openai_model, openai_base_url, created_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         template.id,
                         template.name,
@@ -364,6 +373,7 @@ class MySqlDatabase(IAgentDatabase):
                         template.agent_type.value,
                         template.system_prompt,
                         json.dumps(template.tool_names),
+                        json.dumps(template.auto_approve_tools),
                         template.openai_model,
                         template.openai_base_url,
                         template.created_at,
@@ -379,6 +389,7 @@ class MySqlDatabase(IAgentDatabase):
         description: str | None = None,
         system_prompt: str | None = None,
         tool_names: list[str] | None = None,
+        auto_approve_tools: list[str] | None = None,
         openai_model: str | None = None,
         openai_base_url: str | None = None,
     ) -> AgentTemplate:
@@ -391,6 +402,8 @@ class MySqlDatabase(IAgentDatabase):
             updates["system_prompt"] = system_prompt
         if tool_names is not None:
             updates["tool_names"] = json.dumps(tool_names)
+        if auto_approve_tools is not None:
+            updates["auto_approve_tools"] = json.dumps(auto_approve_tools)
         if openai_model is not None:
             updates["openai_model"] = openai_model
         if openai_base_url is not None:

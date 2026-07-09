@@ -4,6 +4,7 @@ const STATUS_DOT: Record<SessionStatus, string> = {
   INITIALIZING: "bg-yellow-400",
   RUNNING: "bg-green-400",
   WAITING_USER: "bg-blue-400",
+  WAITING_CONFIRM: "bg-orange-400",
   COMPLETED: "bg-gray-500",
   ERROR: "bg-red-400",
 };

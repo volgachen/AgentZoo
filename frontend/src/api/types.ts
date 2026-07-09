@@ -4,6 +4,7 @@ export type SessionStatus =
   | "INITIALIZING"
   | "RUNNING"
   | "WAITING_USER"
+  | "WAITING_CONFIRM"
   | "COMPLETED"
   | "ERROR";
 
@@ -12,6 +13,7 @@ export type MessageRole = "system" | "user" | "agent" | "tool_call" | "tool";
 export type StreamEventType =
   | "text"
   | "tool_call"
+  | "tool_confirm"
   | "tool_result"
   | "status"
   | "error"
@@ -25,6 +27,7 @@ export interface AgentTemplate {
   agent_type: AgentType;
   system_prompt: string;
   tool_names: string[];
+  auto_approve_tools: string[];
   openai_model: string;
   openai_base_url: string | null;
   created_at: string;
