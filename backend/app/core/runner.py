@@ -74,6 +74,13 @@ class SessionRunner:
     async def submit(self, content: str, from_session_id: str | None = None) -> None:
         await self._inbox.put(_InboxItem(content=content, from_session_id=from_session_id))
 
+    async def resolve_decision(self, call_id: str, approved: bool) -> None:
+        # Routed from a WS client's approve/deny frame. This only sets a Future
+        # inside the adapter — it does not drive send/stream — so calling it
+        # outside the runner's own loop doesn't violate the single-consumer
+        # contract.
+        await self._adapter.resolve_decision(call_id, approved)
+
     @property
     def is_generating(self) -> bool:
         return self._generating
@@ -140,10 +147,24 @@ class SessionRunner:
         self._generating = True
         agent_buf: list[str] = []
         errored = False
+        awaiting_confirm = False
         try:
             await self._adapter.send(delivered)
             async for event in self._adapter.stream():
                 self._broadcast(event)
+                # Reflect a pending confirm in the session status so the
+                # dashboard shows "waiting for approval"; flip back to RUNNING
+                # once the gate clears (the tool result or next event arrives).
+                if event.type == StreamEventType.TOOL_CONFIRM:
+                    awaiting_confirm = True
+                    await self._db.update_session_status(
+                        self._session_id, SessionStatus.WAITING_CONFIRM
+                    )
+                elif awaiting_confirm:
+                    awaiting_confirm = False
+                    await self._db.update_session_status(
+                        self._session_id, SessionStatus.RUNNING
+                    )
                 if event.type == StreamEventType.TEXT:
                     agent_buf.append(event.data)
                 elif event.type == StreamEventType.TOOL_CALL:

@@ -16,6 +16,7 @@ class CreateAgentRequest(BaseModel):
     agent_type: AgentType
     system_prompt: str = ""
     tool_names: list[str] = Field(default_factory=list)
+    auto_approve_tools: list[str] = Field(default_factory=list)
     openai_model: str = "gpt-4o"
     openai_base_url: str | None = None
 
@@ -25,6 +26,7 @@ class UpdateAgentRequest(BaseModel):
     description: str | None = None
     system_prompt: str | None = None
     tool_names: list[str] | None = None
+    auto_approve_tools: list[str] | None = None
     openai_model: str | None = None
     openai_base_url: str | None = None
 
@@ -50,6 +52,7 @@ async def create_agent(
     db: IAgentDatabase = Depends(get_db),
 ):
     _validate_tools(body.tool_names)
+    _validate_tools(body.auto_approve_tools)
     template = AgentTemplate(**body.model_dump())
     return await db.create_agent(template)
 
@@ -75,6 +78,8 @@ async def update_agent(
 
     if body.tool_names is not None:
         _validate_tools(body.tool_names)
+    if body.auto_approve_tools is not None:
+        _validate_tools(body.auto_approve_tools)
 
     return await db.update_agent(agent_id, **body.model_dump(exclude_unset=True))
 

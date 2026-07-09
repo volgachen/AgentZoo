@@ -2,12 +2,20 @@ import { create } from "zustand";
 import type { Message, Session, StreamEvent, Task } from "../api/types";
 import { api, createSessionSocket } from "../api/client";
 
+interface PendingConfirm {
+  call_id: string;
+  name: string;
+  args: unknown;
+}
+
 interface SessionEntry {
   session: Session;
   events: StreamEvent[];
   socket: WebSocket | null;
   generating: boolean;
   tasks: Task[];
+  // Tool calls awaiting a human approve/deny decision (see TOOL_CONFIRM).
+  pendingConfirms: PendingConfirm[];
 }
 
 // Map a persisted Message into the StreamEvent shape the console renders, so
@@ -44,6 +52,7 @@ interface Store {
     additionalPromptPath?: string | null,
   ) => Promise<string>;
   sendMessage: (sessionId: string, content: string) => void;
+  resolveConfirm: (sessionId: string, callId: string, approved: boolean) => void;
   closeSession: (sessionId: string) => Promise<void>;
   refreshSession: (sessionId: string) => Promise<void>;
   fetchTasks: (sessionId: string) => Promise<void>;
@@ -71,12 +80,44 @@ export const useStore = create<Store>((set, get) => {
         }
         const isTerminal = frame.type === "done" || frame.type === "error";
         const isUser = frame.type === "user";
+
+        // A tool_confirm frame carries {call_id,name,args}: surface it in the
+        // log AND enqueue an interactive approve/deny card.
+        let pendingConfirms = entry.pendingConfirms;
+        if (frame.type === "tool_confirm") {
+          try {
+            const obj = JSON.parse(frame.data);
+            pendingConfirms = [
+              ...pendingConfirms,
+              { call_id: obj.call_id, name: obj.name, args: obj.args },
+            ];
+          } catch {
+            // malformed — leave the queue as-is
+          }
+        } else if (frame.type === "tool_result") {
+          // The gate cleared (approved-and-ran or denied): drop the oldest
+          // pending card for this tool name. We match by name because the
+          // result frame carries {name,result} but not call_id.
+          try {
+            const obj = JSON.parse(frame.data);
+            const idx = pendingConfirms.findIndex((p) => p.name === obj.name);
+            if (idx !== -1) {
+              pendingConfirms = pendingConfirms.filter((_, i) => i !== idx);
+            }
+          } catch {
+            // ignore
+          }
+        } else if (isTerminal) {
+          pendingConfirms = [];
+        }
+
         return {
           sessions: {
             ...s.sessions,
             [sessionId]: {
               ...entry,
               events: [...entry.events, frame as StreamEvent],
+              pendingConfirms,
               generating: isTerminal
                 ? false
                 : isUser
@@ -125,7 +166,7 @@ export const useStore = create<Store>((set, get) => {
           const existing = next[session.id];
           next[session.id] = existing
             ? { ...existing, session }
-            : { session, events: [], socket: null, generating: false, tasks: [] };
+            : { session, events: [], socket: null, generating: false, tasks: [], pendingConfirms: [] };
         }
         return { sessions: next };
       });
@@ -177,6 +218,7 @@ export const useStore = create<Store>((set, get) => {
                   socket,
                   generating: false,
                   tasks: [],
+                  pendingConfirms: [],
                 },
           },
         };
@@ -222,6 +264,7 @@ export const useStore = create<Store>((set, get) => {
             socket,
             generating: false,
             tasks: [],
+            pendingConfirms: [],
           },
         },
       }));
@@ -242,6 +285,34 @@ export const useStore = create<Store>((set, get) => {
             [sessionId]: {
               ...cur,
               generating: true,
+            },
+          },
+        };
+      });
+    },
+
+    resolveConfirm: (sessionId, callId, approved) => {
+      const entry = get().sessions[sessionId];
+      if (!entry?.socket) return;
+      entry.socket.send(
+        JSON.stringify({
+          decision: approved ? "approve" : "deny",
+          call_id: callId,
+        }),
+      );
+      // Optimistically drop the card; the eventual tool_result would clear it
+      // too, but removing it now keeps the UI responsive.
+      set((s) => {
+        const cur = s.sessions[sessionId];
+        if (!cur) return s;
+        return {
+          sessions: {
+            ...s.sessions,
+            [sessionId]: {
+              ...cur,
+              pendingConfirms: cur.pendingConfirms.filter(
+                (p) => p.call_id !== callId,
+              ),
             },
           },
         };

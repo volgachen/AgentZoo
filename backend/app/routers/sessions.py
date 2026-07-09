@@ -65,6 +65,7 @@ async def _build_runner(
             base_url=agent.openai_base_url,
             session_id=session.id,
             working_dir=session.working_dir,
+            auto_approve_tools=agent.auto_approve_tools,
         )
     else:
         raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
@@ -351,6 +352,18 @@ async def session_stream(
         while True:
             raw = await ws.receive_text()
             payload = json.loads(raw)
+            # A client frame is either a new user turn ({"content": ...}) or a
+            # decision on a pending tool confirm ({"decision": "approve"|"deny",
+            # "call_id": ...}). The latter only resolves an adapter Future, so
+            # it's safe to route directly.
+            if "decision" in payload:
+                call_id = payload.get("call_id")
+                approved = payload.get("decision") == "approve"
+                if call_id:
+                    logger.info("WS decision session=%s call_id=%s approved=%s",
+                                session_id, call_id, approved)
+                    await runner.resolve_decision(call_id, approved)
+                continue
             content = payload.get("content", "")
             logger.info("WS recv session=%s len=%d", session_id, len(content))
             await runner.submit(content)

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -26,9 +27,12 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         api_key: str | None = None,
         session_id: str | None = None,
         working_dir: str | None = None,
+        auto_approve_tools: list[str] | None = None,
     ) -> None:
         super().__init__(session_id)
         self._tool_names = tool_names
+        # Tools NOT in this set are gated behind a human confirm before running.
+        self._auto_approve = set(auto_approve_tools or [])
         self._model = model
         self._base_url = base_url
         self._api_key = api_key
@@ -40,6 +44,9 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         self._tools: list[BaseTool] = []
         self._messages: list[dict] = []
         self._pending: str | None = None
+        # call_id -> Future resolved by resolve_decision when a human approves
+        # (True) or denies (False) a gated tool call the stream is blocked on.
+        self._pending_confirms: dict[str, asyncio.Future[bool]] = {}
         self._alive = False
         self._client: AsyncOpenAI | None = None
 
@@ -232,17 +239,41 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                     data=json.dumps({"name": fn_name, "args": fn_args}),
                 )
 
-                tool = tool_map.get(fn_name)
-                if tool is None:
-                    result = f"Error: tool '{fn_name}' not found"
-                    logger.warning("tool %s not in map (available=%s)", fn_name, list(tool_map))
-                else:
+                # Human-in-the-loop gate: any tool not on the auto-approve list
+                # blocks here until resolve_decision() sets this Future. The
+                # stream runs inside the runner's task, so awaiting is fine — the
+                # runner keeps fanning out our already-yielded events while we
+                # wait. stop() cancels the Future, which propagates as normal
+                # task cancellation.
+                denied = False
+                if fn_name not in self._auto_approve:
+                    fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+                    self._pending_confirms[tc.id] = fut
+                    yield StreamEvent(
+                        type=StreamEventType.TOOL_CONFIRM,
+                        data=json.dumps({"call_id": tc.id, "name": fn_name, "args": fn_args}),
+                    )
                     try:
-                        result = await tool.execute(**fn_args)
-                        logger.debug("tool %s result len=%d", fn_name, len(result))
-                    except Exception as e:
-                        logger.exception("tool %s raised", fn_name)
-                        result = f"Error executing {fn_name}: {e}"
+                        approved = await fut
+                    finally:
+                        self._pending_confirms.pop(tc.id, None)
+                    denied = not approved
+
+                if denied:
+                    result = "Error: user denied execution of this tool call."
+                    logger.info("tool %s denied by user", fn_name)
+                else:
+                    tool = tool_map.get(fn_name)
+                    if tool is None:
+                        result = f"Error: tool '{fn_name}' not found"
+                        logger.warning("tool %s not in map (available=%s)", fn_name, list(tool_map))
+                    else:
+                        try:
+                            result = await tool.execute(**fn_args)
+                            logger.debug("tool %s result len=%d", fn_name, len(result))
+                        except Exception as e:
+                            logger.exception("tool %s raised", fn_name)
+                            result = f"Error executing {fn_name}: {e}"
 
                 self._messages.append({
                     "role": "tool",
@@ -263,9 +294,20 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         logger.info("turn complete iters=%d", loop_iter)
         yield StreamEvent(type=StreamEventType.DONE, data="")
 
+    async def resolve_decision(self, call_id: str, approved: bool) -> None:
+        fut = self._pending_confirms.get(call_id)
+        if fut is not None and not fut.done():
+            fut.set_result(approved)
+
     async def stop(self) -> None:
         self._alive = False
         self._client = None
+        # Unblock any stream awaiting a confirm so it doesn't leak a pending
+        # Future when the session is torn down mid-decision.
+        for fut in self._pending_confirms.values():
+            if not fut.done():
+                fut.cancel()
+        self._pending_confirms.clear()
 
     @property
     def is_alive(self) -> bool:
