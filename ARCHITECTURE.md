@@ -28,7 +28,7 @@
 ### 1. 核心领域模型 (Domain Models)
 
 *   **AgentTemplate (智能体模板)**: 定义 Agent 的类型、Prompt 和包含的工具。
-*   **Session (会话状态)**: 管理多轮对话，记录状态枚举 (`INITIALIZING`, `RUNNING`, `WAITING_USER`, `COMPLETED`, `ERROR`)。
+*   **Session (会话状态)**: 管理多轮对话，记录状态枚举 (`INITIALIZING`, `RUNNING`, `WAITING_USER`, `WAITING_CONFIRM`, `COMPLETED`, `ERROR`)。
 *   **Message (交互日志)**: 记录系统、用户、工具与 Agent 之间的每一次信息流转。
 
 ### 2. 数据库接口定义 (`IAgentDatabase`)

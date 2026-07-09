@@ -44,7 +44,7 @@ npm run dev
 | DELETE | `/api/v1/sessions/{id}` | Terminate a session |
 | WS | `/api/v1/sessions/{id}/stream` | Real-time event stream |
 
-WebSocket events are JSON with `type` and `data` fields. Types: `text`, `tool_call`, `status`, `error`, `done`, `session_state`.
+WebSocket events are JSON with `type` and `data` fields. Types: `text`, `tool_call`, `tool_confirm`, `tool_result`, `status`, `error`, `done`, `user`, `session_state`. Inbound from the client is either `{ content }` (a user turn) or `{ decision, call_id }` (approve/deny a `tool_confirm`).
 
 ## Project Structure
 
