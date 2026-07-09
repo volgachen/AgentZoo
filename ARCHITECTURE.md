@@ -14,7 +14,7 @@
 
 | 层级 | 模块名称 | 技术栈选型 | 核心职责 |
 |---|---|---|---|
-| **前端呈现层** | Management Dashboard | Vue 3 / React 18, Tailwind CSS | 提供可视化控制台，包括智能体注册、活跃会话监控、实时日志流（WebSocket）。 |
+| **前端呈现层** | Management Dashboard | React 19, Vite, Tailwind CSS | 提供可视化控制台，包括智能体注册、活跃会话监控、实时日志流（WebSocket）。 |
 | **网关接入层** | API & WebSocket Gateway | FastAPI (Python), Uvicorn | 暴露 RESTful 接口与长连接，处理跨域 (CORS)，管理全局并发请求。 |
 | **核心逻辑层** | Session & Route Manager | 异步 Python, 依赖注入 (DI) | 负责状态机流转，依靠仓储模式 (Repository) 读写数据，调度底层 Adapter。 |
 | **代理适配层** | Agent Adapters | `asyncio.subprocess`, SDKs | 屏蔽底层差异。将标准指令转化为 API 请求或 CLI 标准输入，并捕获输出返回给网关。 |
@@ -54,8 +54,9 @@ class IAgentDatabase(ABC):
 
 ### 3. 分阶段实现策略
 
-*   **阶段一 (当前/研发期)**：注入 `MockMemoryDatabase`。数据存储在 Python 字典中，极速启动，无需配置外部环境，方便跑通前后端通信与 Agent 适配逻辑。
-*   **阶段二 (生产期)**：注入 `PostgreSQLDatabase`。基于 `SQLAlchemy` (asyncpg) 重新实现接口方法，业务层代码 **零修改** 即可实现持久化存储。
+*   **阶段一 (研发期)**：注入 `MockMemoryDatabase`。数据存储在 Python 字典中，极速启动，无需配置外部环境，方便跑通前后端通信与 Agent 适配逻辑。仍作为无 MySQL 时的回退实现保留。
+*   **阶段二 (当前)**：注入 `MySqlDatabase`（`DB_TYPE=mysql`，默认）。基于 `aiomysql` 实现接口，启动时幂等地建表与播种，业务层代码 **零修改**。
+*   **阶段三 (生产目标)**：注入 `PostgreSQLDatabase`（Milestone 4）。基于 `SQLAlchemy` (asyncpg) 重新实现同一接口，同样对业务层零侵入。
 
 ---
 
@@ -76,11 +77,11 @@ class IAgentDatabase(ABC):
 
 针对不同类型的 Agent，必须实现 `BaseAgentAdapter` 接口。
 
-*   **基础 Tool-use Agent**: 通过标准 LLM SDK 循环调用，解析 `tool_calls`。
+*   **基础 Tool-use Agent**: 通过标准 LLM SDK 循环调用，解析 `tool_calls`；非白名单工具在执行前经 `TOOL_CONFIRM` 事件阻塞等待人工批准（Human-in-the-loop）。
 *   **Claude Code Adapter (重点难点)**:
-    *   使用 `asyncio.create_subprocess_shell` 启动进程。
-    *   使用异步队列 (asyncio.Queue) 或非阻塞 I/O 实时读取 `stdout/stderr`，将其解析为文本流通过 WebSocket 发送。
-    *   接收网关指令，写入 `stdin` 以推进对话。
+    *   `claude` CLI 是单轮的（读一条 stdin 即退出），因此**每轮 `stream()` 都新起一个子进程**，而非维持长驻进程 —— 早期用 `asyncio.Queue` + 持久 stdin 的方案因 CLI 遇 EOF 即退出而失败。
+    *   会话连续性交由 CLI 自身：首轮 `--session-id`，后续 `--resume <session_id>`。
+    *   以 `--output-format stream-json --verbose` 启动，实时解析 NDJSON（`system/init`、`assistant`、`result`）为 `StreamEvent` 经 WebSocket 下发。
 
 ---
 
@@ -122,7 +123,7 @@ class IAgentDatabase(ABC):
 *   **📍 Milestone 2: 攻坚 Claude Code 适配器**
     *   实现通过 `asyncio.subprocess` 后台安全运行 Claude Code，并将 CLI 输出成功转为 WebSocket 流推送给客户端。
 *   **📍 Milestone 3: 前端 Dashboard 连通**
-    *   基于 Vue/React 搭建控制台，实现状态展示和日志渲染。
+    *   基于 React 19 搭建控制台，实现状态展示和日志渲染。
 *   **📍 Milestone 4: 工作流组装与生产化迁移**
     *   串联 Research -> Script -> Broadcast 工作流。
-    *   将 Mock 数据库替换为 PostgreSQL。
+    *   持久化已从 Mock 迁至 MySQL（当前默认）；PostgreSQL 为后续生产目标。
