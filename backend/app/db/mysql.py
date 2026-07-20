@@ -97,6 +97,17 @@ CREATE TABLE IF NOT EXISTS task_counters (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 ]
 
+# Idempotent column migrations for databases created before a column existed.
+# MySQL 8 lacks `ADD COLUMN IF NOT EXISTS`, so we probe information_schema first.
+# Each entry: (table, column, "ALTER TABLE ... ADD COLUMN ...").
+_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+    (
+        "agents",
+        "auto_approve_tools",
+        "ALTER TABLE agents ADD COLUMN auto_approve_tools JSON DEFAULT NULL",
+    ),
+]
+
 _SEED_AGENTS: list[dict[str, Any]] = [
     {
         "id": "main-agent",
@@ -296,6 +307,7 @@ class MySqlDatabase(IAgentDatabase):
             autocommit=True,
         )
         await self._init_schema()
+        await self._migrate_columns()
         await self._seed_agents()
 
     async def close(self) -> None:
@@ -311,6 +323,23 @@ class MySqlDatabase(IAgentDatabase):
                     warnings.simplefilter("ignore")
                     for sql in _SCHEMA_SQL:
                         await cur.execute(sql)
+
+    async def _migrate_columns(self) -> None:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    for table, column, alter_sql in _COLUMN_MIGRATIONS:
+                        await cur.execute(
+                            """SELECT COUNT(*) FROM information_schema.columns
+                               WHERE table_schema = %s
+                                 AND table_name = %s
+                                 AND column_name = %s""",
+                            (self._settings.mysql_database, table, column),
+                        )
+                        (exists,) = await cur.fetchone()
+                        if not exists:
+                            await cur.execute(alter_sql)
 
     async def _seed_agents(self) -> None:
         now = datetime.now(timezone.utc)
