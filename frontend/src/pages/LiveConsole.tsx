@@ -169,7 +169,7 @@ export default function LiveConsole() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entry?.events.length]);
+  }, [entry?.events.length, entry?.generating]);
 
   if (!entry) {
     return (
@@ -253,6 +253,12 @@ export default function LiveConsole() {
           {events.map((ev, i) => (
             <EventLine key={i} event={ev} />
           ))}
+          {generating && (
+            <div className="flex items-center gap-2 font-mono text-sm text-indigo-300">
+              <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-indigo-400/40 border-t-indigo-300 animate-spin" />
+              <span className="text-gray-500">generating…</span>
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
 
