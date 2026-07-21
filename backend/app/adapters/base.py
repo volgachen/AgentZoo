@@ -16,6 +16,11 @@ class StreamEventType(str, Enum):
     # {call_id, name, args}.
     TOOL_CONFIRM = "tool_confirm"
     TOOL_RESULT = "tool_result"
+    # Emitted once per turn (just before DONE) with the current conversation's
+    # token footprint so the UI can show context usage and a future
+    # auto-compression step can decide when to summarize. data is JSON
+    # {context_tokens, prompt_tokens, completion_tokens}.
+    USAGE = "usage"
     STATUS = "status"
     ERROR = "error"
     DONE = "done"

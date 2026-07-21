@@ -53,6 +53,13 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         self._pending_confirms: dict[str, asyncio.Future[bool]] = {}
         self._alive = False
         self._client: AsyncOpenAI | None = None
+        # Size of the conversation currently held in _messages, in tokens, as
+        # reported by the model's usage on the last completion call of a turn
+        # (prompt_tokens covers the full re-sent context; completion_tokens is
+        # the reply appended to it). This is the number a future auto-compression
+        # step will threshold on — not cumulative billed tokens, which exceed the
+        # context size because the agentic loop re-sends _messages each iteration.
+        self._context_tokens = 0
 
     async def start(self, system_prompt: str) -> None:
         base_url = self._base_url or os.getenv("OPENAI_BASE_URL")
@@ -184,6 +191,11 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         tool_schemas = [t.to_openai_schema() for t in self._tools]
         tool_map = {t.name: t for t in self._tools}
         loop_iter = 0
+        # Usage from the most recent completion this turn. The last call's
+        # prompt_tokens reflects the full context after all tool results were
+        # appended, so it's the value we surface as the conversation footprint.
+        last_prompt_tokens = 0
+        last_completion_tokens = 0
 
         while True:
             loop_iter += 1
@@ -222,6 +234,14 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                     ),
                 )
                 return
+
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                # prompt_tokens = full context sent this iteration; completion =
+                # the assistant message about to be appended. Overwrite (not add)
+                # each iteration so the final values describe the last, largest call.
+                last_prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                last_completion_tokens = getattr(usage, "completion_tokens", 0) or 0
 
             choice = response.choices[0]
             msg = choice.message
@@ -303,7 +323,20 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                     data=json.dumps({"name": fn_name, "result": result_view}),
                 )
 
-        logger.info("turn complete iters=%d", loop_iter)
+        # context_tokens = the whole conversation as the model last measured it
+        # (prompt = re-sent history, completion = final reply appended to it).
+        self._context_tokens = last_prompt_tokens + last_completion_tokens
+        logger.info(
+            "turn complete iters=%d context_tokens=%d", loop_iter, self._context_tokens
+        )
+        yield StreamEvent(
+            type=StreamEventType.USAGE,
+            data=json.dumps({
+                "context_tokens": self._context_tokens,
+                "prompt_tokens": last_prompt_tokens,
+                "completion_tokens": last_completion_tokens,
+            }),
+        )
         yield StreamEvent(type=StreamEventType.DONE, data="")
 
     async def resolve_decision(self, call_id: str, approved: bool) -> None:
@@ -320,6 +353,17 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
             if not fut.done():
                 fut.cancel()
         self._pending_confirms.clear()
+
+    @property
+    def context_tokens(self) -> int:
+        """Token footprint of the conversation as of the last completed turn.
+
+        This is what a future auto-compression step should threshold on: when it
+        exceeds a budget, summarize/trim _messages and reset. 0 until the first
+        turn completes (and after a restart, until the first post-rehydrate turn
+        re-reports usage — we don't persist it since the API refreshes it for free).
+        """
+        return self._context_tokens
 
     @property
     def is_alive(self) -> bool:
