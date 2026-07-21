@@ -15,6 +15,7 @@ _TASK_TRUNCATE = 240
 @register_tool
 class ListSubagentsTool(BaseTool):
     name = "list_subagents"
+    requires_approval = False
     description = (
         "List all subagent sessions spawned from the current session. Returns "
         "each subagent's id, status, agent template, working directory, and "

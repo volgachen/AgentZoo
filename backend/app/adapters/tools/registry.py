@@ -18,3 +18,9 @@ def load_tools(names: list[str]) -> list[BaseTool]:
 
 def list_available() -> list[str]:
     return list(_REGISTRY.keys())
+
+
+def default_approvals() -> dict[str, bool]:
+    """Map each registered tool name to its class-level requires_approval default.
+    This is the backend-wide baseline an agent's config.tool_approvals overrides."""
+    return {name: cls.requires_approval for name, cls in _REGISTRY.items()}

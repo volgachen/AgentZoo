@@ -9,6 +9,7 @@ _NS = {"atom": "http://www.w3.org/2005/Atom"}
 @register_tool
 class ArxivSearchTool(BaseTool):
     name = "arxiv_search"
+    requires_approval = False
     description = "Search arxiv.org for academic papers by keyword or topic."
 
     def parameters_schema(self) -> dict:

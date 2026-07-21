@@ -66,6 +66,7 @@ def _strip_html(text: str) -> str:
 @register_tool
 class WebFetchTool(BaseTool):
     name = "web_fetch"
+    requires_approval = False
     description = (
         "Fetches content from a specified URL and processes it using an AI model.\n"
         "- Takes a URL and a prompt as input\n"

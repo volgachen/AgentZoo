@@ -11,6 +11,7 @@ logger = logging.getLogger("agentzoo.tool.task_list")
 @register_tool
 class TaskListTool(BaseTool):
     name = "task_list"
+    requires_approval = False
     description = (
         "List all tasks in your task list. Use this to see what work is "
         "available, check overall progress, and find tasks that are blocked by "

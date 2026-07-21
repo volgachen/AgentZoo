@@ -27,7 +27,12 @@ export interface AgentTemplate {
   agent_type: AgentType;
   system_prompt: string;
   tool_names: string[];
-  auto_approve_tools: string[];
+  // Per-agent config bag. config.tool_approvals is a { toolName: requiresApproval }
+  // map overriding each tool's backend default; other keys reserved for future use.
+  config: {
+    tool_approvals?: Record<string, boolean>;
+    [key: string]: unknown;
+  };
   openai_model: string;
   openai_base_url: string | null;
   created_at: string;

@@ -38,10 +38,13 @@ class AgentTemplate(BaseModel):
     system_prompt: str
     # tool_use agent config
     tool_names: list[str] = Field(default_factory=list)
-    # Tool names that run without a human confirm. Any tool NOT listed here
-    # triggers a TOOL_CONFIRM gate before it executes. Empty list = every tool
-    # requires confirmation. Only honored by the tool_use adapter.
-    auto_approve_tools: list[str] = Field(default_factory=list)
+    # Per-agent configuration bag. Currently holds `tool_approvals`, a
+    # {tool_name: requires_approval} dict that overrides each tool's class-level
+    # default (BaseTool.requires_approval). Only tools the agent wants to deviate
+    # on need an entry; everything else falls back to the tool default. Kept as a
+    # generic dict so future per-agent knobs (e.g. max_iterations) can live here
+    # without another schema migration. Only honored by the tool_use adapter.
+    config: dict = Field(default_factory=dict)
     openai_model: str = "gpt-4o"
     openai_base_url: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

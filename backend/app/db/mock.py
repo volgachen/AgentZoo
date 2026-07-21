@@ -53,8 +53,8 @@ _SEED_AGENTS = [
             "web_search", "web_fetch", "arxiv_search",
             "session_send", "write", "read", "edit",
         ],
-        # Read-only tools run without asking; write/edit/session_send are gated.
-        auto_approve_tools=["web_search", "web_fetch", "arxiv_search", "read"],
+        # Read-only tools (search/fetch/read) auto-run via their tool defaults;
+        # write/edit/session_send stay gated. No per-agent overrides needed.
     ),
     AgentTemplate(
         id="agent-claude-code-001",
@@ -98,7 +98,7 @@ class MockMemoryDatabase(IAgentDatabase):
         description: str | None = None,
         system_prompt: str | None = None,
         tool_names: list[str] | None = None,
-        auto_approve_tools: list[str] | None = None,
+        config: dict | None = None,
         openai_model: str | None = None,
         openai_base_url: str | None = None,
     ) -> AgentTemplate:
@@ -111,8 +111,8 @@ class MockMemoryDatabase(IAgentDatabase):
             agent.system_prompt = system_prompt
         if tool_names is not None:
             agent.tool_names = tool_names
-        if auto_approve_tools is not None:
-            agent.auto_approve_tools = auto_approve_tools
+        if config is not None:
+            agent.config = config
         if openai_model is not None:
             agent.openai_model = openai_model
         if openai_base_url is not None:

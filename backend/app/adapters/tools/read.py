@@ -12,6 +12,7 @@ _MAX_CHARS = _MAX_TOKENS * _CHARS_PER_TOKEN
 @register_tool
 class ReadTool(BaseTool):
     name = "read"
+    requires_approval = False
     description = (
         "Read a text file and return its contents with 1-based line numbers "
         "(format: '<lineno>\\t<content>'). Use offset/limit to read a slice. "

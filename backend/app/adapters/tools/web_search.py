@@ -16,6 +16,7 @@ _CURRENT_MONTH_YEAR = datetime.now().strftime("%B %Y")
 @register_tool
 class WebSearchTool(BaseTool):
     name = "web_search"
+    requires_approval = False
     description = (
         "- Allows the agent to search the web and use the results to inform responses\n"
         "- Provides up-to-date information for current events and recent data\n"

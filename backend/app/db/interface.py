@@ -29,7 +29,7 @@ class IAgentDatabase(ABC):
         description: str | None = None,
         system_prompt: str | None = None,
         tool_names: list[str] | None = None,
-        auto_approve_tools: list[str] | None = None,
+        config: dict | None = None,
         openai_model: str | None = None,
         openai_base_url: str | None = None,
     ) -> AgentTemplate: pass

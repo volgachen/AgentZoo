@@ -12,6 +12,7 @@ logger = logging.getLogger("agentzoo.tool.task_update")
 @register_tool
 class TaskUpdateTool(BaseTool):
     name = "task_update"
+    requires_approval = False
     description = (
         "Update a task: change its status, edit fields, set dependencies, assign "
         "an owner, or delete it.\n\n"

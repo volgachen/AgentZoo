@@ -5,6 +5,11 @@ import os
 class BaseTool(ABC):
     name: str
     description: str
+    # Default confirm policy for this tool: True = a human must approve each call
+    # (safe default). Low-risk tools (read-only, task bookkeeping) override this to
+    # False. An agent's config.tool_approvals can override per tool at runtime; this
+    # class attribute is the fallback when the agent doesn't mention the tool.
+    requires_approval: bool = True
     session_id: str | None = None
     # The session's working_dir, set by the adapter at start() time. Tools that
     # touch the filesystem (bash, read, write, edit) use this as the cwd / base

@@ -27,12 +27,16 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         api_key: str | None = None,
         session_id: str | None = None,
         working_dir: str | None = None,
-        auto_approve_tools: list[str] | None = None,
+        config: dict | None = None,
     ) -> None:
         super().__init__(session_id)
         self._tool_names = tool_names
-        # Tools NOT in this set are gated behind a human confirm before running.
-        self._auto_approve = set(auto_approve_tools or [])
+        # Per-agent tool approval overrides: {tool_name: requires_approval}. Merged
+        # over each tool's class default at start() to build self._requires_approval.
+        self._approval_overrides: dict[str, bool] = dict((config or {}).get("tool_approvals", {}))
+        # tool_name -> whether a human confirm is required; populated in start()
+        # once the tools are loaded (so we know each tool's class-level default).
+        self._requires_approval: dict[str, bool] = {}
         self._model = model
         self._base_url = base_url
         self._api_key = api_key
@@ -64,6 +68,12 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         for t in self._tools:
             t.session_id = self.session_id
             t.working_dir = self._working_dir
+        # Effective confirm policy = each tool's class default, overridden by the
+        # agent's config.tool_approvals. Unknown override keys are ignored.
+        self._requires_approval = {
+            t.name: self._approval_overrides.get(t.name, t.requires_approval)
+            for t in self._tools
+        }
         if system_prompt:
             self._messages = [{"role": "system", "content": system_prompt}]
         self._alive = True
@@ -246,7 +256,9 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                 # wait. stop() cancels the Future, which propagates as normal
                 # task cancellation.
                 denied = False
-                if fn_name not in self._auto_approve:
+                # Default True (gate) for a tool with no resolved policy — e.g. an
+                # unknown tool name the model hallucinated; safer to ask.
+                if self._requires_approval.get(fn_name, True):
                     fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
                     self._pending_confirms[tc.id] = fut
                     yield StreamEvent(

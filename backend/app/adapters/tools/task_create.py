@@ -11,6 +11,7 @@ logger = logging.getLogger("agentzoo.tool.task_create")
 @register_tool
 class TaskCreateTool(BaseTool):
     name = "task_create"
+    requires_approval = False
     description = (
         "Create a task in your task list to track work. Tasks are scoped to your "
         "session, so use this to organize complex multi-step work and track "

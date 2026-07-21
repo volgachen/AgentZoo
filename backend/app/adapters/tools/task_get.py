@@ -11,6 +11,7 @@ logger = logging.getLogger("agentzoo.tool.task_get")
 @register_tool
 class TaskGetTool(BaseTool):
     name = "task_get"
+    requires_approval = False
     description = (
         "Retrieve the full details of a single task by its id: the complete "
         "description, status, owner, and dependency relationships (what it "
