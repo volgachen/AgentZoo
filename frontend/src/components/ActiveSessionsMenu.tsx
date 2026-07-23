@@ -62,7 +62,8 @@ export default function ActiveSessionsMenu({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-72 z-20 rounded-lg border border-gray-700 bg-gray-900 shadow-xl py-1">
+        <div className="absolute right-0 top-full pt-1 w-72 z-20">
+          <div className="rounded-lg border border-gray-700 bg-gray-900 shadow-xl py-1">
           {active.length === 0 ? (
             <p className="px-3 py-2 text-xs text-gray-500">No active sessions.</p>
           ) : (
@@ -94,6 +95,7 @@ export default function ActiveSessionsMenu({
               );
             })
           )}
+          </div>
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useStore } from "./store/sessions";
 import { usePluginStore } from "./store/plugins";
+import ActiveSessionsMenu from "./components/ActiveSessionsMenu";
 
 const NAV = [
   { to: "/", label: "Agent Registry", end: true },
@@ -15,6 +16,9 @@ export default function App() {
   const runningPlugins = Object.values(plugins).filter(
     (p) => p.plugin.status === "running",
   ).length;
+  // Highlight the session we're viewing (if the current route is a console).
+  const match = useLocation().pathname.match(/^\/console\/(.+)$/);
+  const currentSessionId = match?.[1];
 
   return (
     <div className="h-screen overflow-hidden bg-gray-950 text-gray-100 flex flex-col">
@@ -48,6 +52,9 @@ export default function App() {
               )}
             </NavLink>
           ))}
+        </div>
+        <div className="ml-auto">
+          <ActiveSessionsMenu currentSessionId={currentSessionId} />
         </div>
       </nav>
 
