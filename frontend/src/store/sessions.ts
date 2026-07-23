@@ -54,6 +54,7 @@ interface Store {
   sendMessage: (sessionId: string, content: string) => void;
   resolveConfirm: (sessionId: string, callId: string, approved: boolean) => void;
   closeSession: (sessionId: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
   refreshSession: (sessionId: string) => Promise<void>;
   fetchTasks: (sessionId: string) => Promise<void>;
 }
@@ -286,6 +287,20 @@ export const useStore = create<Store>((set, get) => {
               ...cur,
               generating: true,
             },
+          },
+        };
+      });
+    },
+
+    renameSession: async (sessionId, title) => {
+      const updated = await api.sessions.updateTitle(sessionId, title);
+      set((s) => {
+        const entry = s.sessions[sessionId];
+        if (!entry) return s;
+        return {
+          sessions: {
+            ...s.sessions,
+            [sessionId]: { ...entry, session: updated },
           },
         };
       });

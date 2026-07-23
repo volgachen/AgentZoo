@@ -77,8 +77,8 @@ export default function ActiveSessionsMenu({
                     isCurrent ? "bg-gray-800/60" : ""
                   }`}
                 >
-                  <span className="font-mono text-xs text-gray-300 truncate">
-                    {s.id.slice(0, 8)}…
+                  <span className="text-xs text-gray-300 truncate">
+                    {s.title ?? `${s.id.slice(0, 8)}…`}
                     {isCurrent && (
                       <span className="ml-1 text-[10px] text-indigo-400">
                         current

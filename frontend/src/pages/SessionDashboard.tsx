@@ -1,7 +1,8 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store/sessions";
-import type { Session, SessionStatus, StreamEvent } from "../api/types";
+import { api } from "../api/client";
+import type { AgentTemplate, Session, SessionStatus, StreamEvent } from "../api/types";
 
 function formatCreatedAt(iso: string): string {
   // The backend stores created_at as UTC but the DATETIME column serializes
@@ -98,14 +99,39 @@ export default function SessionDashboard() {
   const sessions = useStore((s) => s.sessions);
   const setActive = useStore((s) => s.setActiveSession);
   const closeSession = useStore((s) => s.closeSession);
+  const renameSession = useStore((s) => s.renameSession);
   const hydrateSessions = useStore((s) => s.hydrateSessions);
   const navigate = useNavigate();
+
+  // agent_id -> display name. Sessions only carry the agent UUID, so we fetch
+  // the registry once to render human-readable names in the Agent column.
+  const [agentNames, setAgentNames] = useState<Record<string, string>>({});
+
+  // Which session's title is being edited inline, and the draft text.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
 
   useEffect(() => {
     hydrateSessions().catch((err) =>
       console.error("failed to hydrate sessions", err),
     );
+    api.agents
+      .list()
+      .then((agents: AgentTemplate[]) =>
+        setAgentNames(Object.fromEntries(agents.map((a) => [a.id, a.name]))),
+      )
+      .catch((err) => console.error("failed to load agents", err));
   }, [hydrateSessions]);
+
+  const commitRename = (sessionId: string) => {
+    const title = draftTitle.trim();
+    setEditingId(null);
+    const current = sessions[sessionId]?.session.title ?? "";
+    if (!title || title === current) return;
+    renameSession(sessionId, title).catch((err) =>
+      console.error("failed to rename session", err),
+    );
+  };
 
   const entries: Entry[] = Object.values(sessions).map((e) => ({
     session: e.session,
@@ -137,7 +163,7 @@ export default function SessionDashboard() {
           <thead>
             <tr className="text-gray-400 border-b border-gray-700">
               <th className="pb-3 pr-4 font-medium">Active</th>
-              <th className="pb-3 pr-4 font-medium">Session ID</th>
+              <th className="pb-3 pr-4 font-medium">Title</th>
               <th className="pb-3 pr-4 font-medium">Agent</th>
               <th className="pb-3 pr-4 font-medium">Working Dir</th>
               <th className="pb-3 pr-4 font-medium">Status</th>
@@ -165,21 +191,56 @@ export default function SessionDashboard() {
                     </span>
                   </span>
                 </td>
-                <td className="py-3 pr-4 font-mono text-gray-300 text-xs">
+                <td className="py-3 pr-4 text-gray-200 max-w-xs">
                   <span
-                    className="inline-flex items-center gap-1"
+                    className="inline-flex items-center gap-1 max-w-full"
                     style={{ paddingLeft: `${depth * 1.25}rem` }}
                   >
-                    {depth > 0 && <span className="text-gray-600">└─</span>}
-                    <span>{session.id.slice(0, 8)}…</span>
+                    {depth > 0 && (
+                      <span className="text-gray-600 shrink-0">└─</span>
+                    )}
+                    {editingId === session.id ? (
+                      <input
+                        autoFocus
+                        value={draftTitle}
+                        onChange={(e) => setDraftTitle(e.target.value)}
+                        onBlur={() => commitRename(session.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename(session.id);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="w-full bg-gray-800 border border-indigo-600 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+                      />
+                    ) : (
+                      <button
+                        // Hover reveals the full session id (the ID column was
+                        // removed); the tree indent/connector live here now.
+                        title={`${session.id}\n\nClick to rename`}
+                        onClick={() => {
+                          setEditingId(session.id);
+                          setDraftTitle(session.title ?? "");
+                        }}
+                        className="text-left truncate hover:text-indigo-300 transition-colors"
+                      >
+                        {session.title ?? (
+                          <span className="text-gray-600">untitled</span>
+                        )}
+                      </button>
+                    )}
                     {orphanParent && (
-                      <span className="ml-1 text-[10px] text-gray-600">
+                      <span className="ml-1 text-[10px] text-gray-600 shrink-0">
                         ↳ from {orphanParent.slice(0, 8)}…
                       </span>
                     )}
                   </span>
                 </td>
-                <td className="py-3 pr-4 text-gray-300">{session.agent_id}</td>
+                <td className="py-3 pr-4 text-gray-300">
+                  {agentNames[session.agent_id] ?? (
+                    <span className="font-mono text-xs text-gray-500">
+                      {session.agent_id}
+                    </span>
+                  )}
+                </td>
                 <td className="py-3 pr-4 font-mono text-gray-400 text-xs">
                   {session.working_dir ?? <span className="text-gray-600">—</span>}
                 </td>

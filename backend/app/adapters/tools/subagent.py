@@ -126,6 +126,10 @@ class SubagentTool(BaseTool):
                 body["env"] = parent_env
 
         label = description or f"subagent:{agent_id}"
+        # Persist the task description as the session's title so spawned
+        # sub-sessions are identifiable in the UI (not just an auto agent-name
+        # label). Falls back to the same string used for logging.
+        body["title"] = label
         logger.info(
             "launching %s agent=%s parent=%s isolation=%s",
             label, agent_id, parent_session_id, isolation or "none",

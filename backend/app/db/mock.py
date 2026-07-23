@@ -128,18 +128,22 @@ class MockMemoryDatabase(IAgentDatabase):
         agent_id: str,
         working_dir: str | None = None,
         *,
+        title: str | None = None,
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
         additional_prompt_path: str | None = None,
     ) -> Session:
-        await self.get_agent(agent_id)  # validate agent exists
+        agent = await self.get_agent(agent_id)  # validate agent exists
         session = Session(
             agent_id=agent_id,
+            title=title,
             working_dir=working_dir,
             parent_session_id=parent_session_id,
             additional_prompt=additional_prompt,
             additional_prompt_path=additional_prompt_path,
         )
+        if not session.title:
+            session.title = f"{agent.name} · {session.created_at:%H:%M}"
         self._sessions[session.id] = session
         self._messages[session.id] = []
         return session
@@ -148,6 +152,12 @@ class MockMemoryDatabase(IAgentDatabase):
         session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(f"Session '{session_id}' not found")
+        return session
+
+    async def update_session_title(self, session_id: str, title: str) -> Session:
+        session = await self.get_session(session_id)
+        session.title = title
+        session.updated_at = datetime.now(timezone.utc)
         return session
 
     async def list_sessions(self) -> List[Session]:

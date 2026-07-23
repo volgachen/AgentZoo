@@ -19,6 +19,9 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 class CreateSessionRequest(BaseModel):
     agent_id: str
+    # Optional friendly label. When omitted, the DB seeds one from the agent
+    # name + creation time. Spawned sub-sessions pass their task description here.
+    title: str | None = None
     working_dir: str | None = None
     # When set, the server copies template_dir -> working_dir before starting
     # the adapter. working_dir must not already exist in that case.
@@ -36,6 +39,10 @@ class CreateSessionRequest(BaseModel):
     # Path to a file containing additional system prompt content. The file is
     # read and appended to the agent's base system_prompt (after additional_prompt).
     additional_prompt_path: str | None = None
+
+
+class UpdateSessionRequest(BaseModel):
+    title: str
 
 
 class PostMessageRequest(BaseModel):
@@ -191,6 +198,7 @@ async def create_session(
     session = await db.create_session(
         body.agent_id,
         working_dir=working_dir,
+        title=body.title,
         parent_session_id=body.parent_session_id,
         additional_prompt=body.additional_prompt,
         additional_prompt_path=body.additional_prompt_path,
@@ -274,6 +282,21 @@ async def list_sessions(db: IAgentDatabase = Depends(get_db)):
 async def get_session(session_id: str, db: IAgentDatabase = Depends(get_db)):
     try:
         return await db.get_session(session_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.patch("/{session_id}", response_model=Session)
+async def rename_session(
+    session_id: str,
+    body: UpdateSessionRequest,
+    db: IAgentDatabase = Depends(get_db),
+):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title must not be empty")
+    try:
+        return await db.update_session_title(session_id, title)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

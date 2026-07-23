@@ -53,6 +53,10 @@ class AgentTemplate(BaseModel):
 class Session(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     agent_id: str
+    # Human-friendly label for the session. Auto-seeded at creation (agent name +
+    # time, or a spawning caller's description) and renameable via PATCH. Optional
+    # so rows created before this column exists still load.
+    title: Optional[str] = None
     working_dir: Optional[str] = None
     # Session that spawned this one via POST /sessions, if any. None means the
     # session was created directly by an operator. Used to render the agent

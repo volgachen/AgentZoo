@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE TABLE IF NOT EXISTS sessions (
     id                VARCHAR(36)   PRIMARY KEY,
     agent_id          VARCHAR(36)   NOT NULL,
+    title             VARCHAR(300)  DEFAULT NULL,
     working_dir       VARCHAR(1000) DEFAULT NULL,
     parent_session_id VARCHAR(36)   DEFAULT NULL,
     additional_prompt LONGTEXT      DEFAULT NULL,
@@ -105,6 +106,11 @@ _COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
         "agents",
         "config",
         "ALTER TABLE agents ADD COLUMN config JSON DEFAULT NULL",
+    ),
+    (
+        "sessions",
+        "title",
+        "ALTER TABLE sessions ADD COLUMN title VARCHAR(300) DEFAULT NULL AFTER agent_id",
     ),
 ]
 
@@ -224,6 +230,7 @@ def _row_to_session(row: dict[str, Any]) -> Session:
     return Session(
         id=row["id"],
         agent_id=row["agent_id"],
+        title=row.get("title"),
         working_dir=row["working_dir"],
         parent_session_id=row["parent_session_id"],
         # `.get` instead of `[]` so a database that hasn't had the additional_*
@@ -465,29 +472,37 @@ class MySqlDatabase(IAgentDatabase):
         agent_id: str,
         working_dir: str | None = None,
         *,
+        title: str | None = None,
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
         additional_prompt_path: str | None = None,
     ) -> Session:
-        await self.get_agent(agent_id)
+        agent = await self.get_agent(agent_id)
         session = Session(
             agent_id=agent_id,
+            title=title,
             working_dir=working_dir,
             parent_session_id=parent_session_id,
             additional_prompt=additional_prompt,
             additional_prompt_path=additional_prompt_path,
         )
+        # Seed a friendly default so the UI never shows a blank title. Uses the
+        # agent's name + creation time; a caller-supplied title (e.g. a spawning
+        # agent's task description) takes precedence.
+        if not session.title:
+            session.title = f"{agent.name} · {session.created_at:%H:%M}"
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """INSERT INTO sessions
-                       (id, agent_id, working_dir, parent_session_id,
+                       (id, agent_id, title, working_dir, parent_session_id,
                         additional_prompt, additional_prompt_path,
                         status, created_at, updated_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         session.id,
                         session.agent_id,
+                        session.title,
                         session.working_dir,
                         session.parent_session_id,
                         session.additional_prompt,
@@ -496,6 +511,18 @@ class MySqlDatabase(IAgentDatabase):
                         session.created_at,
                         session.updated_at,
                     ),
+                )
+        return session
+
+    async def update_session_title(self, session_id: str, title: str) -> Session:
+        session = await self.get_session(session_id)
+        session.title = title
+        session.updated_at = datetime.now(timezone.utc)
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE sessions SET title = %s, updated_at = %s WHERE id = %s",
+                    (session.title, session.updated_at, session_id),
                 )
         return session
 

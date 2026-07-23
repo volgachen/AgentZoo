@@ -208,7 +208,9 @@ export default function LiveConsole() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-white">Live Console</h1>
+          <h1 className="text-lg font-semibold text-white">
+            {session.title ?? "Live Console"}
+          </h1>
           <p className="text-xs text-gray-500 font-mono">{session.id}</p>
           <p className="text-xs text-gray-500 font-mono">
             <span className="text-gray-600">cwd: </span>

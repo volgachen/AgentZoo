@@ -41,6 +41,7 @@ export interface AgentTemplate {
 export interface Session {
   id: string;
   agent_id: string;
+  title: string | null;
   working_dir: string | null;
   parent_session_id: string | null;
   additional_prompt: string | null;

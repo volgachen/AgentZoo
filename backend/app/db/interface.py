@@ -43,6 +43,7 @@ class IAgentDatabase(ABC):
         agent_id: str,
         working_dir: str | None = None,
         *,
+        title: str | None = None,
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
         additional_prompt_path: str | None = None,
@@ -50,6 +51,9 @@ class IAgentDatabase(ABC):
 
     @abstractmethod
     async def get_session(self, session_id: str) -> Session: pass
+
+    @abstractmethod
+    async def update_session_title(self, session_id: str, title: str) -> Session: pass
 
     @abstractmethod
     async def list_sessions(self) -> List[Session]: pass
