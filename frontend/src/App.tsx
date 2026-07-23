@@ -17,9 +17,9 @@ export default function App() {
   ).length;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
+    <div className="h-screen overflow-hidden bg-gray-950 text-gray-100 flex flex-col">
       {/* Top nav */}
-      <nav className="border-b border-gray-800 px-6 py-3 flex items-center gap-6">
+      <nav className="shrink-0 border-b border-gray-800 px-6 py-3 flex items-center gap-6">
         <span className="font-semibold text-white tracking-tight">AgentZoo</span>
         <div className="flex gap-1">
           {NAV.map(({ to, label, end }) => (
@@ -52,7 +52,7 @@ export default function App() {
       </nav>
 
       {/* Page content */}
-      <main className="flex-1 flex flex-col min-h-0">
+      <main className="flex-1 flex flex-col min-h-0 overflow-y-auto">
         <Outlet />
       </main>
     </div>

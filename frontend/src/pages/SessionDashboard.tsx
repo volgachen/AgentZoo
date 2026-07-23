@@ -25,6 +25,15 @@ const STATUS_STYLE: Record<SessionStatus, string> = {
 interface Entry {
   session: Session;
   events: StreamEvent[];
+  socket: WebSocket | null;
+}
+
+// A session is "active" when it holds a live WebSocket to the backend stream.
+function isActive(entry: Entry): boolean {
+  const s = entry.socket;
+  return (
+    s != null && (s.readyState === WebSocket.OPEN || s.readyState === WebSocket.CONNECTING)
+  );
 }
 
 interface Row {
@@ -50,15 +59,20 @@ function buildForest(entries: Entry[]): Row[] {
     }
   }
 
-  const byCreated = (a: Entry, b: Entry) =>
-    a.session.created_at.localeCompare(b.session.created_at);
+  // Active sessions float to the top; ties break by creation time. Applied to
+  // roots and to each sibling group so the parent -> child forest stays intact.
+  const byActiveThenCreated = (a: Entry, b: Entry) => {
+    const activeDiff = Number(isActive(b)) - Number(isActive(a));
+    if (activeDiff !== 0) return activeDiff;
+    return a.session.created_at.localeCompare(b.session.created_at);
+  };
 
   const roots = entries
     .filter((e) => {
       const pid = e.session.parent_session_id;
       return !pid || !byId.has(pid);
     })
-    .sort(byCreated);
+    .sort(byActiveThenCreated);
 
   const rows: Row[] = [];
   const visited = new Set<string>();
@@ -71,7 +85,9 @@ function buildForest(entries: Entry[]): Row[] {
       depth,
       orphanParent: pid && !byId.has(pid) ? pid : null,
     });
-    const kids = (childrenOf.get(entry.session.id) ?? []).slice().sort(byCreated);
+    const kids = (childrenOf.get(entry.session.id) ?? [])
+      .slice()
+      .sort(byActiveThenCreated);
     for (const kid of kids) walk(kid, depth + 1);
   };
   for (const root of roots) walk(root, 0);
@@ -91,7 +107,11 @@ export default function SessionDashboard() {
     );
   }, [hydrateSessions]);
 
-  const entries = Object.values(sessions);
+  const entries: Entry[] = Object.values(sessions).map((e) => ({
+    session: e.session,
+    events: e.events,
+    socket: e.socket,
+  }));
 
   if (entries.length === 0) {
     return (
@@ -116,6 +136,7 @@ export default function SessionDashboard() {
         <table className="w-full text-sm text-left">
           <thead>
             <tr className="text-gray-400 border-b border-gray-700">
+              <th className="pb-3 pr-4 font-medium">Active</th>
               <th className="pb-3 pr-4 font-medium">Session ID</th>
               <th className="pb-3 pr-4 font-medium">Agent</th>
               <th className="pb-3 pr-4 font-medium">Working Dir</th>
@@ -126,11 +147,24 @@ export default function SessionDashboard() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ entry: { session, events }, depth, orphanParent }) => (
+            {rows.map(({ entry, depth, orphanParent }) => {
+              const { session, events } = entry;
+              const active = isActive(entry);
+              return (
               <tr
                 key={session.id}
                 className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors"
               >
+                <td className="py-3 pr-4">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className={`w-2 h-2 rounded-full ${active ? "bg-green-400" : "bg-gray-600"}`}
+                    />
+                    <span className={`text-xs ${active ? "text-green-300" : "text-gray-500"}`}>
+                      {active ? "Active" : "Inactive"}
+                    </span>
+                  </span>
+                </td>
                 <td className="py-3 pr-4 font-mono text-gray-300 text-xs">
                   <span
                     className="inline-flex items-center gap-1"
@@ -178,7 +212,8 @@ export default function SessionDashboard() {
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

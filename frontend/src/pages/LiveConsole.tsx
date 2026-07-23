@@ -4,6 +4,7 @@ import { useStore } from "../store/sessions";
 import type { StreamEvent } from "../api/types";
 import TaskListPanel from "../components/TaskListPanel";
 import SubAgentListPanel from "../components/SubAgentListPanel";
+import ActiveSessionsMenu from "../components/ActiveSessionsMenu";
 
 const EVENT_STYLE: Record<string, string> = {
   text: "text-gray-200",
@@ -215,6 +216,7 @@ export default function LiveConsole() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ActiveSessionsMenu currentSessionId={sessionId} />
           {generating ? (
             <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-900/60 text-indigo-200">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-300 animate-pulse" />
