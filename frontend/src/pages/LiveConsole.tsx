@@ -4,6 +4,7 @@ import { useStore } from "../store/sessions";
 import type { StreamEvent } from "../api/types";
 import TaskListPanel from "../components/TaskListPanel";
 import SubAgentListPanel from "../components/SubAgentListPanel";
+import ToolConfirmPanel from "../components/ToolConfirmPanel";
 
 const EVENT_STYLE: Record<string, string> = {
   text: "text-gray-200",
@@ -282,31 +283,18 @@ export default function LiveConsole() {
       {entry.pendingConfirms.length > 0 && (
         <div className="flex flex-col gap-2">
           {entry.pendingConfirms.map((pc) => (
-            <div
+            <ToolConfirmPanel
               key={pc.call_id}
-              className="flex items-center gap-3 bg-orange-950/40 border border-orange-800/60 rounded-lg px-3 py-2"
-            >
-              <span className="text-orange-300 text-sm shrink-0">⚠ Approve tool</span>
-              <code className="flex-1 min-w-0 truncate font-mono text-xs text-orange-200">
-                {pc.name}({toOneLine(JSON.stringify(pc.args ?? {}), 120)})
-              </code>
-              <button
-                onClick={() =>
-                  sessionId && resolveConfirm(sessionId, pc.call_id, true)
-                }
-                className="px-3 py-1 rounded-md bg-green-700 hover:bg-green-600 text-white text-xs font-medium shrink-0"
-              >
-                Allow
-              </button>
-              <button
-                onClick={() =>
-                  sessionId && resolveConfirm(sessionId, pc.call_id, false)
-                }
-                className="px-3 py-1 rounded-md bg-red-800 hover:bg-red-700 text-white text-xs font-medium shrink-0"
-              >
-                Deny
-              </button>
-            </div>
+              name={pc.name}
+              args={pc.args}
+              callId={pc.call_id}
+              onApprove={() =>
+                sessionId && resolveConfirm(sessionId, pc.call_id, true)
+              }
+              onDeny={() =>
+                sessionId && resolveConfirm(sessionId, pc.call_id, false)
+              }
+            />
           ))}
         </div>
       )}
