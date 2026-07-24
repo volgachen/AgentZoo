@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -42,6 +43,12 @@ class SessionRunner:
         self._subscribers: set[asyncio.Queue[StreamEvent | None]] = set()
         self._task: asyncio.Task | None = None
         self._generating = False
+        # TOOL_CONFIRM events are broadcast-only (not persisted), so a client
+        # that connects/reconnects while a tool is awaiting approval would never
+        # see the confirm panel. Cache the currently-pending confirm events here
+        # (keyed by call_id) and replay them to each new subscriber; cleared once
+        # the human decides or the turn moves past the gate.
+        self._pending_confirms: dict[str, StreamEvent] = {}
 
     async def start(self) -> None:
         if self._task is not None:
@@ -65,6 +72,7 @@ class SessionRunner:
             except asyncio.QueueFull:
                 pass
         self._subscribers.clear()
+        self._pending_confirms.clear()
 
         try:
             await self._adapter.stop()
@@ -79,7 +87,18 @@ class SessionRunner:
         # inside the adapter — it does not drive send/stream — so calling it
         # outside the runner's own loop doesn't violate the single-consumer
         # contract.
+        self._pending_confirms.pop(call_id, None)
         await self._adapter.resolve_decision(call_id, approved)
+
+    def _remember_confirm(self, event: StreamEvent) -> None:
+        # event.data is JSON: {"call_id", "name", "args"}. Key the cache by
+        # call_id so a resolved/expired confirm can be dropped individually.
+        try:
+            call_id = json.loads(event.data).get("call_id")
+        except (ValueError, TypeError):
+            call_id = None
+        if call_id:
+            self._pending_confirms[call_id] = event
 
     @property
     def is_generating(self) -> bool:
@@ -89,6 +108,13 @@ class SessionRunner:
     async def subscribe(self) -> AsyncIterator[AsyncIterator[StreamEvent]]:
         q: asyncio.Queue[StreamEvent | None] = asyncio.Queue(maxsize=_SUBSCRIBER_QUEUE_MAX)
         self._subscribers.add(q)
+        # Replay any pending confirm so a (re)connecting client can render the
+        # approval panel immediately instead of only seeing WAITING_CONFIRM.
+        for ev in self._pending_confirms.values():
+            try:
+                q.put_nowait(ev)
+            except asyncio.QueueFull:
+                pass
         try:
             yield self._iter(q)
         finally:
@@ -157,11 +183,13 @@ class SessionRunner:
                 # once the gate clears (the tool result or next event arrives).
                 if event.type == StreamEventType.TOOL_CONFIRM:
                     awaiting_confirm = True
+                    self._remember_confirm(event)
                     await self._db.update_session_status(
                         self._session_id, SessionStatus.WAITING_CONFIRM
                     )
                 elif awaiting_confirm:
                     awaiting_confirm = False
+                    self._pending_confirms.clear()
                     await self._db.update_session_status(
                         self._session_id, SessionStatus.RUNNING
                     )
