@@ -6,6 +6,7 @@ from app.adapters.tools import (  # noqa: F401
     subagent,
     list_subagents,
     bash,
+    node_repl,
     read,
     write,
     edit,

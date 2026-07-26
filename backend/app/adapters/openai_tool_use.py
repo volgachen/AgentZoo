@@ -353,6 +353,12 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
             if not fut.done():
                 fut.cancel()
         self._pending_confirms.clear()
+        # Let stateful tools (e.g. node_repl) tear down long-lived subprocesses.
+        for t in self._tools:
+            try:
+                await t.aclose()
+            except Exception:
+                logger.exception("tool aclose failed: %s", t.name)
 
     @property
     def context_tokens(self) -> int:

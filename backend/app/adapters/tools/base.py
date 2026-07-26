@@ -40,6 +40,14 @@ class BaseTool(ABC):
     async def execute(self, **kwargs) -> str:
         """Run the tool and return a string result."""
 
+    async def aclose(self) -> None:
+        """Release any per-session resources (long-lived subprocesses, etc.).
+
+        Called by the adapter's stop(). Default is a no-op; stateful tools like
+        node_repl override it to tear down their subprocess.
+        """
+        return None
+
     def to_openai_schema(self) -> dict:
         return {
             "type": "function",
