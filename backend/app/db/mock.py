@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Dict, List
 from app.db.interface import IAgentDatabase, _UNSET
+from app.db.seed_browser import browser_agent_template as _browser_agent
 from app.models.domain import (
     AgentTemplate, AgentType, Session, SessionStatus,
     Message, MessageRole,
@@ -63,6 +64,7 @@ _SEED_AGENTS = [
         agent_type=AgentType.CLAUDE_CODE,
         system_prompt="You are a coding assistant powered by Claude Code.",
     ),
+    _browser_agent(),
 ]
 
 

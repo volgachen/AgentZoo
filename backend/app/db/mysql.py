@@ -8,6 +8,7 @@ from aiomysql import DictCursor, Pool
 
 from app.config import Settings
 from app.db.interface import IAgentDatabase, _UNSET
+from app.db.seed_browser import browser_agent_template as _browser_agent
 from app.models.domain import (
     AgentTemplate,
     AgentType,
@@ -201,6 +202,15 @@ _SEED_AGENTS: list[dict[str, Any]] = [
         "openai_model": "claude-sonnet",
         "openai_base_url": None,
     },
+    # Prompt is derived from the installed codex plugin's SKILL.md, so keep it in
+    # one place (db/seed_browser.py) shared with db/mock.py.
+    _browser_agent().model_dump(
+        include={
+            "id", "name", "description", "agent_type", "system_prompt",
+            "tool_names", "config", "openai_model", "openai_base_url",
+        }
+    )
+    | {"agent_type": "tool_use"},
 ]
 
 

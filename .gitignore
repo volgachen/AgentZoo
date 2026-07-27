@@ -23,5 +23,6 @@ dist/
 backend/.plugins/
 
 # Local-only docs (kept out of git history)
-CLAUDE.md
+docs/
+codex_plugins/
 TODO.md
