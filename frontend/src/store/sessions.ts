@@ -214,6 +214,7 @@ export const useStore = create<Store>((set, get) => {
                     status: "RUNNING",
                     created_at: "",
                     updated_at: "",
+                    last_message_at: null,
                   },
                   events: [],
                   socket,

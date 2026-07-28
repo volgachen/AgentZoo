@@ -179,7 +179,7 @@ class MockMemoryDatabase(IAgentDatabase):
         *,
         from_session_id: str | None = None,
     ) -> Message:
-        await self.get_session(session_id)  # validate session exists
+        session = await self.get_session(session_id)  # validate session exists
         message = Message(
             session_id=session_id,
             role=role,
@@ -187,6 +187,7 @@ class MockMemoryDatabase(IAgentDatabase):
             from_session_id=from_session_id,
         )
         self._messages[session_id].append(message)
+        session.last_message_at = message.created_at
         return message
 
     async def get_messages(self, session_id: str) -> List[Message]:

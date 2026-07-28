@@ -49,6 +49,8 @@ export interface Session {
   status: SessionStatus;
   created_at: string;
   updated_at: string;
+  // created_at of the newest message; null for a session with no messages yet.
+  last_message_at: string | null;
 }
 
 export interface Message {

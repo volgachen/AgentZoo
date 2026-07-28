@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     status            VARCHAR(30)   NOT NULL DEFAULT 'INITIALIZING',
     created_at        DATETIME(3)   NOT NULL,
     updated_at        DATETIME(3)   NOT NULL,
+    last_message_at   DATETIME(3)   DEFAULT NULL,
     INDEX idx_sessions_agent (agent_id),
     INDEX idx_sessions_parent (parent_session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
@@ -101,17 +102,35 @@ CREATE TABLE IF NOT EXISTS task_counters (
 
 # Idempotent column migrations for databases created before a column existed.
 # MySQL 8 lacks `ADD COLUMN IF NOT EXISTS`, so we probe information_schema first.
-# Each entry: (table, column, "ALTER TABLE ... ADD COLUMN ...").
-_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+# Each entry: (table, column, [SQL statements run once, when the column is added]).
+# The list lets a migration backfill the new column right after adding it.
+_COLUMN_MIGRATIONS: list[tuple[str, str, list[str]]] = [
     (
         "agents",
         "config",
-        "ALTER TABLE agents ADD COLUMN config JSON DEFAULT NULL",
+        ["ALTER TABLE agents ADD COLUMN config JSON DEFAULT NULL"],
     ),
     (
         "sessions",
         "title",
-        "ALTER TABLE sessions ADD COLUMN title VARCHAR(300) DEFAULT NULL AFTER agent_id",
+        [
+            "ALTER TABLE sessions ADD COLUMN title VARCHAR(300) DEFAULT NULL "
+            "AFTER agent_id"
+        ],
+    ),
+    (
+        "sessions",
+        "last_message_at",
+        [
+            "ALTER TABLE sessions ADD COLUMN last_message_at DATETIME(3) "
+            "DEFAULT NULL AFTER updated_at",
+            # One-off backfill from the existing messages so pre-migration
+            # sessions sort correctly instead of collapsing to NULL.
+            """UPDATE sessions s SET s.last_message_at = (
+                   SELECT MAX(m.created_at) FROM messages m
+                   WHERE m.session_id = s.id
+               )""",
+        ],
     ),
 ]
 
@@ -251,6 +270,7 @@ def _row_to_session(row: dict[str, Any]) -> Session:
         status=SessionStatus(row["status"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        last_message_at=row.get("last_message_at"),
     )
 
 
@@ -346,7 +366,7 @@ class MySqlDatabase(IAgentDatabase):
             async with conn.cursor() as cur:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    for table, column, alter_sql in _COLUMN_MIGRATIONS:
+                    for table, column, statements in _COLUMN_MIGRATIONS:
                         await cur.execute(
                             """SELECT COUNT(*) FROM information_schema.columns
                                WHERE table_schema = %s
@@ -356,7 +376,8 @@ class MySqlDatabase(IAgentDatabase):
                         )
                         (exists,) = await cur.fetchone()
                         if not exists:
-                            await cur.execute(alter_sql)
+                            for stmt in statements:
+                                await cur.execute(stmt)
 
     async def _seed_agents(self) -> None:
         now = datetime.now(timezone.utc)
@@ -507,8 +528,8 @@ class MySqlDatabase(IAgentDatabase):
                     """INSERT INTO sessions
                        (id, agent_id, title, working_dir, parent_session_id,
                         additional_prompt, additional_prompt_path,
-                        status, created_at, updated_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        status, created_at, updated_at, last_message_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         session.id,
                         session.agent_id,
@@ -520,6 +541,7 @@ class MySqlDatabase(IAgentDatabase):
                         session.status.value,
                         session.created_at,
                         session.updated_at,
+                        session.last_message_at,
                     ),
                 )
         return session
@@ -600,6 +622,14 @@ class MySqlDatabase(IAgentDatabase):
                         message.from_session_id,
                         message.created_at,
                     ),
+                )
+                # Denormalized "last activity" marker on the session. Kept in
+                # sync here because add_message is the only write path for
+                # messages, which keeps the dashboard's sort key a plain column
+                # read instead of a MAX() join over the (large) messages table.
+                await cur.execute(
+                    "UPDATE sessions SET last_message_at = %s WHERE id = %s",
+                    (message.created_at, session_id),
                 )
         return message
 

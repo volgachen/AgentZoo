@@ -2,12 +2,13 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useStore } from "../store/sessions";
 import { api } from "../api/client";
-import type { AgentTemplate, Session, SessionStatus, StreamEvent } from "../api/types";
+import type { AgentTemplate, Session, SessionStatus } from "../api/types";
 
-function formatCreatedAt(iso: string): string {
-  // The backend stores created_at as UTC but the DATETIME column serializes
+function formatTimestamp(iso: string | null): string {
+  // The backend stores timestamps as UTC but the DATETIME column serializes
   // without a timezone suffix, so a bare "2026-06-09T03:00:00" would be parsed
   // as local time. Append "Z" when no offset is present so it's read as UTC.
+  if (!iso) return "—";
   const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
   const d = new Date(hasTz ? iso : `${iso}Z`);
   if (Number.isNaN(d.getTime())) return iso;
@@ -25,7 +26,6 @@ const STATUS_STYLE: Record<SessionStatus, string> = {
 
 interface Entry {
   session: Session;
-  events: StreamEvent[];
   socket: WebSocket | null;
 }
 
@@ -60,12 +60,17 @@ function buildForest(entries: Entry[]): Row[] {
     }
   }
 
-  // Active sessions float to the top; ties break by creation time. Applied to
-  // roots and to each sibling group so the parent -> child forest stays intact.
-  const byActiveThenCreated = (a: Entry, b: Entry) => {
+  // Active sessions float to the top; ties break by last activity, newest
+  // first. Sessions with no messages yet fall back to their creation time so
+  // they don't sink below every session that has ever been talked to. Applied
+  // to roots and to each sibling group so the parent -> child forest stays
+  // intact.
+  const lastActivity = (e: Entry) =>
+    e.session.last_message_at ?? e.session.created_at;
+  const byActiveThenUpdated = (a: Entry, b: Entry) => {
     const activeDiff = Number(isActive(b)) - Number(isActive(a));
     if (activeDiff !== 0) return activeDiff;
-    return a.session.created_at.localeCompare(b.session.created_at);
+    return lastActivity(b).localeCompare(lastActivity(a));
   };
 
   const roots = entries
@@ -73,7 +78,7 @@ function buildForest(entries: Entry[]): Row[] {
       const pid = e.session.parent_session_id;
       return !pid || !byId.has(pid);
     })
-    .sort(byActiveThenCreated);
+    .sort(byActiveThenUpdated);
 
   const rows: Row[] = [];
   const visited = new Set<string>();
@@ -88,7 +93,7 @@ function buildForest(entries: Entry[]): Row[] {
     });
     const kids = (childrenOf.get(entry.session.id) ?? [])
       .slice()
-      .sort(byActiveThenCreated);
+      .sort(byActiveThenUpdated);
     for (const kid of kids) walk(kid, depth + 1);
   };
   for (const root of roots) walk(root, 0);
@@ -135,7 +140,6 @@ export default function SessionDashboard() {
 
   const entries: Entry[] = Object.values(sessions).map((e) => ({
     session: e.session,
-    events: e.events,
     socket: e.socket,
   }));
 
@@ -167,14 +171,13 @@ export default function SessionDashboard() {
               <th className="pb-3 pr-4 font-medium">Agent</th>
               <th className="pb-3 pr-4 font-medium">Working Dir</th>
               <th className="pb-3 pr-4 font-medium">Status</th>
-              <th className="pb-3 pr-4 font-medium">Created</th>
-              <th className="pb-3 pr-4 font-medium">Events</th>
+              <th className="pb-3 pr-4 font-medium">Last Update</th>
               <th className="pb-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(({ entry, depth, orphanParent }) => {
-              const { session, events } = entry;
+              const { session } = entry;
               const active = isActive(entry);
               return (
               <tr
@@ -264,9 +267,8 @@ export default function SessionDashboard() {
                   </span>
                 </td>
                 <td className="py-3 pr-4 text-gray-400 text-xs whitespace-nowrap">
-                  {formatCreatedAt(session.created_at)}
+                  {formatTimestamp(session.last_message_at)}
                 </td>
-                <td className="py-3 pr-4 text-gray-400">{events.length}</td>
                 <td className="py-3 flex gap-2">
                   <button
                     onClick={() => {

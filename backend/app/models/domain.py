@@ -73,6 +73,10 @@ class Session(BaseModel):
     status: SessionStatus = SessionStatus.INITIALIZING
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # created_at of the newest message in this session, or None while it has no
+    # messages. Maintained on every add_message (a stored column, not derived on
+    # read) so the dashboard can sort on it without joining the messages table.
+    last_message_at: Optional[datetime] = None
 
 
 class Message(BaseModel):
