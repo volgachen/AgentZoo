@@ -189,7 +189,11 @@ class SessionRunner:
                     )
                 elif awaiting_confirm:
                     awaiting_confirm = False
-                    self._pending_confirms.clear()
+                    # The confirm has cleared (user made a decision or tool executed).
+                    # Don't clear _pending_confirms here — resolve_decision already
+                    # removed the entry when the user approved/denied. If we clear here,
+                    # a disconnect before TOOL_RESULT arrives would prevent replay on
+                    # reconnect.
                     await self._db.update_session_status(
                         self._session_id, SessionStatus.RUNNING
                     )
