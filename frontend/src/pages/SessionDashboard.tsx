@@ -242,7 +242,19 @@ export default function SessionDashboard() {
                   )}
                 </td>
                 <td className="py-3 pr-4 font-mono text-gray-400 text-xs">
-                  {session.working_dir ?? <span className="text-gray-600">—</span>}
+                  {session.working_dir ? (
+                    // Long absolute paths were the main thing forcing the table
+                    // wider than the viewport; clamp + tooltip instead.
+                    <div
+                      className="max-w-[18rem] truncate"
+                      title={session.working_dir}
+                      dir="rtl"
+                    >
+                      {session.working_dir}
+                    </div>
+                  ) : (
+                    <span className="text-gray-600">—</span>
+                  )}
                 </td>
                 <td className="py-3 pr-4">
                   <span

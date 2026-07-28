@@ -207,6 +207,7 @@ export const useStore = create<Store>((set, get) => {
                   session: {
                     id: sessionId,
                     agent_id: "",
+                    title: null,
                     working_dir: null,
                     parent_session_id: null,
                     additional_prompt: null,

@@ -2,12 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The dashboard is a full-width app shell: the Vite starter's fixed 1126px
+   #root was clipping the session table and forcing horizontal scroll. */
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
+  width: 100%;
   min-height: 100svh;
   display: flex;
   flex-direction: column;
