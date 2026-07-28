@@ -78,14 +78,13 @@ export const api = {
       agent_id: string,
       working_dir: string | null = null,
       template_dir: string | null = null,
-      env: string | null = null,
       additional_prompt: string | null = null,
       additional_prompt_path: string | null = null,
       title: string | null = null,
     ) =>
       request<Session>("/sessions", {
         method: "POST",
-        body: JSON.stringify({ agent_id, working_dir, template_dir, env, additional_prompt, additional_prompt_path, title }),
+        body: JSON.stringify({ agent_id, working_dir, template_dir, additional_prompt, additional_prompt_path, title }),
       }),
     updateTitle: (id: string, title: string) =>
       request<Session>(`/sessions/${id}`, {

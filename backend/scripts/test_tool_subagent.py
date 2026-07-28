@@ -1,12 +1,11 @@
-"""Hermetic check for the `subagent` tool — worktree + .env inheritance.
+"""Hermetic check for the `subagent` tool — git worktree isolation + spawn.
 
 No network, no server, no real git remote. Exercises:
-  - SubagentTool._read_env (parent .env read, missing -> None)
   - SubagentTool._make_worktree (real git worktree, and non-git fallback)
   - SubagentTool.execute end-to-end, with httpx.AsyncClient redirected to the
     in-process FastAPI app (ASGITransport) so the tool drives the real sessions
-    router + mock DB. Asserts the child session's .env inherits the parent's
-    keys plus the gateway-injected PARENT_SESSION_ID / MY_SESSION_ID.
+    router + mock DB. Asserts the child records its parent, gets its own
+    worktree, and that no .env is cloned into it.
 
 Requires `git` in PATH (for the worktree case).
 """
@@ -46,7 +45,7 @@ def _make_repo(path: Path) -> None:
 
 
 async def main() -> int:
-    section("subagent tool: worktree + .env inheritance (hermetic)")
+    section("subagent tool: worktree isolation + spawn (hermetic)")
     tool = SubagentTool()
     failures = 0
 
@@ -55,24 +54,8 @@ async def main() -> int:
         wt_root = td / "worktrees"
         os.environ["AGENTZOO_WORKTREE_ROOT"] = str(wt_root)
 
-        # ---- _read_env ----
-        section("_read_env")
         parent_repo = td / "parent"
         _make_repo(parent_repo)
-        (parent_repo / ".env").write_text(
-            "OPENAI_API_KEY=sk-parent\nGATEWAY_URL=http://localhost:12598\n"
-            "MY_SESSION_ID=parent-session-id\n",
-            encoding="utf-8",
-        )
-        env_text = tool._read_env(str(parent_repo))
-        if env_text and "OPENAI_API_KEY=sk-parent" in env_text:
-            ok("_read_env reads parent .env")
-        else:
-            fail(f"_read_env did not return parent keys: {env_text!r}"); failures += 1
-        if tool._read_env(str(td / "nope")) is None:
-            ok("_read_env returns None for missing dir/.env")
-        else:
-            fail("_read_env should be None when .env absent"); failures += 1
 
         # ---- _make_worktree: git repo parent ----
         section("_make_worktree (git repo parent)")
@@ -110,7 +93,7 @@ async def main() -> int:
             fail(f"no-parent fallback wrong: branch={b3!r}"); failures += 1
 
         # ---- execute end-to-end (httpx -> in-process app) ----
-        section("execute end-to-end (.env inheritance through the router)")
+        section("execute end-to-end (worktree spawn through the router)")
         failures += await _execute_e2e(tool, td)
 
     if failures:
@@ -148,9 +131,9 @@ async def _execute_e2e(tool: SubagentTool, td: Path) -> int:
             parent_id = r.json()["id"]
         info(f"parent session: {parent_id}")
 
-        # The gateway overwrites working_dir/.env on create with its own
-        # identity lines. Re-write the parent .env afterwards to model a running
-        # parent whose .env holds real config — that's what the child inherits.
+        # A parent .env with real config: the child must NOT get a copy of it.
+        # Runtime config now reaches children through the backend process env,
+        # not by cloning files into the working dir.
         (parent_repo / ".env").write_text(
             "OPENAI_API_KEY=sk-e2e\nOPENAI_MODEL=gpt-4o\n", encoding="utf-8"
         )
@@ -161,7 +144,7 @@ async def _execute_e2e(tool: SubagentTool, td: Path) -> int:
         )
         info(result.splitlines()[0])
 
-        # Pull the child id out of the result text and inspect its .env.
+        # Pull the child id out of the result text and inspect its working dir.
         child_id = None
         for line in result.splitlines():
             if "session_id:" in line:
@@ -174,36 +157,23 @@ async def _execute_e2e(tool: SubagentTool, td: Path) -> int:
         async with real_client(transport=transport, base_url="http://test") as c:
             r = await c.get(f"/api/v1/sessions/{child_id}")
             assert r.status_code == 200, (r.status_code, r.text)
-            child_wd = r.json()["working_dir"]
-        env_text = (Path(child_wd) / ".env").read_text(encoding="utf-8")
-        info("child .env:\n    " + env_text.replace("\n", "\n    ").rstrip())
+            child = r.json()
+            child_wd = child["working_dir"]
+        info(f"child working_dir: {child_wd}")
 
-        if "OPENAI_API_KEY=sk-e2e" in env_text:
-            ok("child inherited parent's OPENAI_API_KEY")
+        if child["parent_session_id"] == parent_id:
+            ok("child records parent_session_id")
         else:
-            fail("child .env missing inherited OPENAI_API_KEY"); failures += 1
-        if f"PARENT_SESSION_ID={parent_id}" in env_text:
-            ok("gateway injected PARENT_SESSION_ID")
+            fail(f"child parent_session_id={child['parent_session_id']!r}"); failures += 1
+        if Path(child_wd) != Path(str(parent_repo)) and Path(child_wd).is_dir():
+            ok("child got its own worktree dir")
         else:
-            fail("child .env missing PARENT_SESSION_ID"); failures += 1
-        if f"MY_SESSION_ID={child_id}" in env_text:
-            ok("gateway injected MY_SESSION_ID")
+            fail(f"worktree dir wrong: {child_wd}"); failures += 1
+        # No .env is cloned or synthesized any more — the parent's secrets stay put.
+        if not (Path(child_wd) / ".env").exists():
+            ok("no .env written into the child working dir")
         else:
-            fail("child .env missing MY_SESSION_ID"); failures += 1
-        # inherited keys must come before injected ones (set -a: later wins)
-        if env_text.index("OPENAI_API_KEY") < env_text.rindex("MY_SESSION_ID"):
-            ok("inherited env precedes injected identity lines")
-        else:
-            fail("ordering wrong: injected lines should come last"); failures += 1
-
-        # Known issue (see TODO.md): the parent's own MY_SESSION_ID is inherited
-        # verbatim, so the key appears twice — once with the parent's id, once
-        # with the child's. Correctness then relies on the consumer treating the
-        # *last* duplicate as winning. We assert the current (buggy) shape so
-        # this test fails loudly once _read_env is hardened to filter it.
-        if env_text.count("MY_SESSION_ID=") == 2:
-            info("KNOWN ISSUE: MY_SESSION_ID duplicated (parent's leaked in) "
-                 "— see TODO.md; fix by filtering identity keys in _read_env")
+            fail("child working dir unexpectedly has a .env"); failures += 1
 
         # Clean up the worktree git created during execute().
         child_wd_path = Path(child_wd)

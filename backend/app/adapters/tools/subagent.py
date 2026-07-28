@@ -103,8 +103,8 @@ class SubagentTool(BaseTool):
         if parent_session_id:
             body["parent_session_id"] = parent_session_id
 
-        # Look up the parent's working dir once: used both to anchor the git
-        # worktree and to inherit the parent's .env (API keys, gateway URL).
+        # The parent's working dir anchors the git worktree when isolation is
+        # requested; nothing else needs it.
         parent_dir = await self._parent_working_dir(base, parent_session_id)
 
         work_dir: str | None = None
@@ -115,15 +115,6 @@ class SubagentTool(BaseTool):
             logger.info(
                 "worktree isolation: work_dir=%s branch=%s", work_dir, branch
             )
-
-        # Inherit the parent's .env so the subagent has the same runtime config.
-        # The gateway writes this first, then appends PARENT_SESSION_ID /
-        # MY_SESSION_ID (which win on duplicate keys). Only meaningful when the
-        # child gets a working_dir to receive the file.
-        if body.get("working_dir") and parent_dir:
-            parent_env = self._read_env(parent_dir)
-            if parent_env:
-                body["env"] = parent_env
 
         label = description or f"subagent:{agent_id}"
         # Persist the task description as the session's title so spawned
@@ -310,19 +301,6 @@ class SubagentTool(BaseTool):
             )
             return None
         return resp.json().get("working_dir")
-
-    @staticmethod
-    def _read_env(parent_dir: str) -> str | None:
-        # Read the parent's .env verbatim so the child inherits API keys, the
-        # gateway URL, etc. Returns None if there is no .env or it can't be read
-        # (e.g. a git worktree where .env is gitignored and thus absent) — the
-        # caller then just omits env from the create-session body.
-        env_path = os.path.join(parent_dir, ".env")
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except OSError:
-            return None
 
     @staticmethod
     async def _is_git_repo(path: str) -> bool:

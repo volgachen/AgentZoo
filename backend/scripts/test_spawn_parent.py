@@ -1,10 +1,12 @@
-"""Hermetic check for parent_session_id: persistence + .env injection + 404.
+"""Hermetic check for parent_session_id: persistence + template copy + 404.
 
 Runs the real FastAPI app via TestClient (no network/port). Exercises the
-sessions router, mock DB, and the PARENT_SESSION_ID/.env writing path.
+sessions router and the mock DB.
 """
 import tempfile
 from pathlib import Path
+
+import _common  # noqa: F401 — sys.path + .env
 
 from fastapi.testclient import TestClient
 
@@ -33,7 +35,6 @@ def main() -> None:
             "agent_id": AGENT,
             "working_dir": str(child_wd),
             "template_dir": str(template_dir),
-            "env": "GATEWAY_URL=http://localhost:12598",
             "parent_session_id": parent_id,
         })
         assert r.status_code == 201, (r.status_code, r.text)
@@ -41,14 +42,10 @@ def main() -> None:
         print("child created:", child["id"], "parent_session_id=", child["parent_session_id"])
         assert child["parent_session_id"] == parent_id, child
 
-        # 3) .env injection
-        env_text = (child_wd / ".env").read_text(encoding="utf-8")
-        print("---- child .env ----\n" + env_text + "--------------------")
-        assert f"PARENT_SESSION_ID={parent_id}" in env_text, env_text
-        assert f"MY_SESSION_ID={child['id']}" in env_text, env_text
-        assert "GATEWAY_URL=http://localhost:12598" in env_text, env_text
-        # injected lines must come after operator env so they win on `set -a`
-        assert env_text.index("GATEWAY_URL") < env_text.index("PARENT_SESSION_ID")
+        # 3) template copy landed, and the server wrote no .env of its own
+        assert (child_wd / "CLAUDE.md").read_text(encoding="utf-8") == "dummy template\n"
+        assert not (child_wd / ".env").exists(), "server must not write a .env"
+        print("template copied; no .env written OK")
 
         # 4) unknown parent -> 404
         r = client.post(API, json={"agent_id": AGENT, "parent_session_id": "does-not-exist"})

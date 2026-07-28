@@ -26,12 +26,9 @@ class CreateSessionRequest(BaseModel):
     # When set, the server copies template_dir -> working_dir before starting
     # the adapter. working_dir must not already exist in that case.
     template_dir: str | None = None
-    # Optional .env contents written into working_dir after the template copy
-    # (so it overrides any template-provided .env). Requires working_dir.
-    env: str | None = None
     # Session that is spawning this one (the caller's own session id). Recorded
-    # on the new Session and injected into its .env as PARENT_SESSION_ID so the
-    # child can report results back to its parent.
+    # on the new Session and exported to child processes as PARENT_SESSION_ID so
+    # the child can report results back to its parent.
     parent_session_id: str | None = None
     # Additional system prompt content appended to the agent's base system_prompt.
     # Applied before additional_prompt_path.
@@ -189,12 +186,6 @@ async def create_session(
         working_dir = str(dst.resolve())
         logger.info("copied template %s -> %s", src, working_dir)
 
-    if body.env is not None and not working_dir:
-        raise HTTPException(
-            status_code=400,
-            detail="working_dir is required when env is set (it is the file destination)",
-        )
-
     session = await db.create_session(
         body.agent_id,
         working_dir=working_dir,
@@ -204,58 +195,6 @@ async def create_session(
         additional_prompt_path=body.additional_prompt_path,
     )
     logger.debug("session created id=%s status=%s", session.id, session.status)
-
-    # Inject identity into working_dir's .env if we have one. Always include
-    # MY_SESSION_ID so the agent can address itself when calling other sessions
-    # via the gateway, and PARENT_SESSION_ID (when spawned by another session)
-    # so it can report back. We MERGE rather than overwrite: a working_dir may
-    # already hold an operator .env full of API keys (the backend's own, most
-    # dangerously), and a blind write_text would wipe it. We own only the two
-    # identity keys — strip any prior copies of those and re-append so they win
-    # on duplicate-key sourcing; every other line on disk is preserved verbatim.
-    if working_dir:
-        env_path = Path(working_dir) / ".env"
-        # Guard: never touch the backend's own config .env. It holds the operator
-        # OPENAI_*/MYSQL_* credentials and is auto-loaded at startup; a session
-        # must not use the backend source tree (or process cwd) as its
-        # working_dir. If it does, skip injection rather than polluting that file.
-        protected = {
-            (Path(__file__).resolve().parents[2] / ".env").resolve(),
-            (Path.cwd() / ".env").resolve(),
-        }
-        if env_path.resolve() in protected:
-            logger.warning(
-                "skipping .env injection: working_dir %s targets the backend "
-                "config .env (%s); refusing to modify operator credentials",
-                working_dir, env_path,
-            )
-        else:
-            try:
-                existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
-            except OSError as e:
-                logger.exception("failed to read existing .env at %s", env_path)
-                raise HTTPException(status_code=500, detail=f"read .env failed: {e}")
-
-            _managed = {"MY_SESSION_ID", "PARENT_SESSION_ID"}
-            kept = [
-                ln for ln in existing.splitlines()
-                if "=" not in ln or ln.split("=", 1)[0].strip() not in _managed
-            ]
-            parts: list[str] = []
-            base = "\n".join(kept).rstrip("\n")
-            if base:
-                parts.append(base + "\n")
-            if body.env is not None:
-                parts.append(body.env if body.env.endswith("\n") else body.env + "\n")
-            if session.parent_session_id is not None:
-                parts.append(f"PARENT_SESSION_ID={session.parent_session_id}\n")
-            parts.append(f"MY_SESSION_ID={session.id}\n")
-            try:
-                env_path.write_text("".join(parts), encoding="utf-8")
-            except OSError as e:
-                logger.exception("failed to write .env to %s", env_path)
-                raise HTTPException(status_code=500, detail=f"write .env failed: {e}")
-            logger.info("merged .env at %s (preserved %d existing line(s))", env_path, len(kept))
 
     try:
         await _build_runner(
