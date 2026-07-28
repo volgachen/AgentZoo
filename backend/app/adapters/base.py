@@ -66,13 +66,16 @@ class BaseAgentAdapter(ABC):
         """
         return
 
-    async def resolve_decision(self, call_id: str, approved: bool) -> None:
+    async def resolve_decision(self, call_id: str, approved: bool, supplementary_msg: str = "") -> None:
         """Resolve a pending tool-confirm request (see TOOL_CONFIRM).
 
         Called by the runner when a human approves/denies a tool call the
-        adapter is blocked on. Default is a no-op — adapters that don't gate
-        tools (e.g. Claude Code, whose tools run in the CLI subprocess with its
-        own permission flow) simply ignore it.
+        adapter is blocked on. If supplementary_msg is provided, the adapter
+        should append it as a user message after the tool result. If denied
+        without a message, the adapter should skip the next LLM call.
+        Default is a no-op — adapters that don't gate tools (e.g. Claude Code,
+        whose tools run in the CLI subprocess with its own permission flow)
+        simply ignore it.
         """
         return
 

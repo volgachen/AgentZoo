@@ -377,15 +377,16 @@ async def session_stream(
             payload = json.loads(raw)
             # A client frame is either a new user turn ({"content": ...}) or a
             # decision on a pending tool confirm ({"decision": "approve"|"deny",
-            # "call_id": ...}). The latter only resolves an adapter Future, so
-            # it's safe to route directly.
+            # "call_id": ..., "message": ...}). The latter only resolves an adapter
+            # Future, and may also queue a supplementary user message.
             if "decision" in payload:
                 call_id = payload.get("call_id")
                 approved = payload.get("decision") == "approve"
+                supplementary_msg = payload.get("message", "").strip()
                 if call_id:
-                    logger.info("WS decision session=%s call_id=%s approved=%s",
-                                session_id, call_id, approved)
-                    await runner.resolve_decision(call_id, approved)
+                    logger.info("WS decision session=%s call_id=%s approved=%s has_message=%s",
+                                session_id, call_id, approved, bool(supplementary_msg))
+                    await runner.resolve_decision(call_id, approved, supplementary_msg)
                 continue
             content = payload.get("content", "")
             logger.info("WS recv session=%s len=%d", session_id, len(content))

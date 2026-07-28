@@ -82,13 +82,13 @@ class SessionRunner:
     async def submit(self, content: str, from_session_id: str | None = None) -> None:
         await self._inbox.put(_InboxItem(content=content, from_session_id=from_session_id))
 
-    async def resolve_decision(self, call_id: str, approved: bool) -> None:
-        # Routed from a WS client's approve/deny frame. This only sets a Future
-        # inside the adapter — it does not drive send/stream — so calling it
-        # outside the runner's own loop doesn't violate the single-consumer
-        # contract.
+    async def resolve_decision(self, call_id: str, approved: bool, supplementary_msg: str = "") -> None:
+        # Routed from a WS client's approve/deny frame. This resolves the adapter's
+        # Future first. If a supplementary message is provided, we queue it as a
+        # follow-up user message after the tool result. If denied without a message,
+        # we signal to skip the next LLM call.
         self._pending_confirms.pop(call_id, None)
-        await self._adapter.resolve_decision(call_id, approved)
+        await self._adapter.resolve_decision(call_id, approved, supplementary_msg)
 
     def _remember_confirm(self, event: StreamEvent) -> None:
         # event.data is JSON: {"call_id", "name", "args"}. Key the cache by

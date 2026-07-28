@@ -288,11 +288,11 @@ export default function LiveConsole() {
               name={pc.name}
               args={pc.args}
               callId={pc.call_id}
-              onApprove={() =>
-                sessionId && resolveConfirm(sessionId, pc.call_id, true)
+              onApprove={(message) =>
+                sessionId && resolveConfirm(sessionId, pc.call_id, true, message)
               }
-              onDeny={() =>
-                sessionId && resolveConfirm(sessionId, pc.call_id, false)
+              onDeny={(message) =>
+                sessionId && resolveConfirm(sessionId, pc.call_id, false, message)
               }
             />
           ))}

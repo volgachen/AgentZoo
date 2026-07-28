@@ -52,7 +52,7 @@ interface Store {
     additionalPromptPath?: string | null,
   ) => Promise<string>;
   sendMessage: (sessionId: string, content: string) => void;
-  resolveConfirm: (sessionId: string, callId: string, approved: boolean) => void;
+  resolveConfirm: (sessionId: string, callId: string, approved: boolean, message?: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   refreshSession: (sessionId: string) => Promise<void>;
@@ -306,13 +306,14 @@ export const useStore = create<Store>((set, get) => {
       });
     },
 
-    resolveConfirm: (sessionId, callId, approved) => {
+    resolveConfirm: (sessionId, callId, approved, message) => {
       const entry = get().sessions[sessionId];
       if (!entry?.socket) return;
       entry.socket.send(
         JSON.stringify({
           decision: approved ? "approve" : "deny",
           call_id: callId,
+          message: message || undefined,
         }),
       );
       // Optimistically drop the card; the eventual tool_result would clear it

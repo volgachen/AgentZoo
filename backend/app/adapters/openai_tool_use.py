@@ -48,9 +48,11 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         self._tools: list[BaseTool] = []
         self._messages: list[dict] = []
         self._pending: str | None = None
-        # call_id -> Future resolved by resolve_decision when a human approves
-        # (True) or denies (False) a gated tool call the stream is blocked on.
-        self._pending_confirms: dict[str, asyncio.Future[bool]] = {}
+        # call_id -> (Future[bool], supplementary_msg). The Future is resolved by
+        # resolve_decision when a human approves (True) or denies (False) a gated
+        # tool call. supplementary_msg is set when the user provides additional
+        # context with their decision.
+        self._pending_confirms: dict[str, tuple[asyncio.Future[bool], str]] = {}
         self._alive = False
         self._client: AsyncOpenAI | None = None
         # Size of the conversation currently held in _messages, in tokens, as
@@ -259,6 +261,11 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
             if not msg.tool_calls:
                 break
 
+            # Track denials: if ALL tools are denied AND none have supplementary
+            # messages, we skip the next LLM call
+            all_denied = True
+            any_has_message = False
+
             for tc in msg.tool_calls:
                 fn_name = tc.function.name
                 fn_args = json.loads(tc.function.arguments)
@@ -276,17 +283,20 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                 # wait. stop() cancels the Future, which propagates as normal
                 # task cancellation.
                 denied = False
+                supplementary_msg = ""
                 # Default True (gate) for a tool with no resolved policy — e.g. an
                 # unknown tool name the model hallucinated; safer to ask.
                 if self._requires_approval.get(fn_name, True):
                     fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-                    self._pending_confirms[tc.id] = fut
+                    self._pending_confirms[tc.id] = (fut, "")
                     yield StreamEvent(
                         type=StreamEventType.TOOL_CONFIRM,
                         data=json.dumps({"call_id": tc.id, "name": fn_name, "args": fn_args}),
                     )
                     try:
                         approved = await fut
+                        # Retrieve the supplementary message set by resolve_decision
+                        _, supplementary_msg = self._pending_confirms.get(tc.id, (None, ""))
                     finally:
                         self._pending_confirms.pop(tc.id, None)
                     denied = not approved
@@ -295,6 +305,7 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                     result = "Error: user denied execution of this tool call."
                     logger.info("tool %s denied by user", fn_name)
                 else:
+                    all_denied = False
                     tool = tool_map.get(fn_name)
                     if tool is None:
                         result = f"Error: tool '{fn_name}' not found"
@@ -323,6 +334,24 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                     data=json.dumps({"name": fn_name, "result": result_view}),
                 )
 
+                # If a supplementary message was provided, append it as a user message
+                if supplementary_msg:
+                    any_has_message = True
+                    self._messages.append({
+                        "role": "user",
+                        "content": supplementary_msg,
+                    })
+                    yield StreamEvent(
+                        type=StreamEventType.USER,
+                        data=supplementary_msg,
+                    )
+                    logger.info("appended supplementary message len=%d", len(supplementary_msg))
+
+            # If ALL tools were denied AND none have supplementary messages, stop the loop
+            if all_denied and not any_has_message:
+                logger.info("all tools denied without messages, skipping further LLM calls")
+                break
+
         # context_tokens = the whole conversation as the model last measured it
         # (prompt = re-sent history, completion = final reply appended to it).
         self._context_tokens = last_prompt_tokens + last_completion_tokens
@@ -339,17 +368,21 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         )
         yield StreamEvent(type=StreamEventType.DONE, data="")
 
-    async def resolve_decision(self, call_id: str, approved: bool) -> None:
-        fut = self._pending_confirms.get(call_id)
-        if fut is not None and not fut.done():
-            fut.set_result(approved)
+    async def resolve_decision(self, call_id: str, approved: bool, supplementary_msg: str = "") -> None:
+        entry = self._pending_confirms.get(call_id)
+        if entry is not None:
+            fut, _ = entry
+            if not fut.done():
+                # Update the tuple with the supplementary message before resolving
+                self._pending_confirms[call_id] = (fut, supplementary_msg)
+                fut.set_result(approved)
 
     async def stop(self) -> None:
         self._alive = False
         self._client = None
         # Unblock any stream awaiting a confirm so it doesn't leak a pending
         # Future when the session is torn down mid-decision.
-        for fut in self._pending_confirms.values():
+        for fut, _ in self._pending_confirms.values():
             if not fut.done():
                 fut.cancel()
         self._pending_confirms.clear()
