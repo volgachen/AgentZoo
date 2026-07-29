@@ -32,6 +32,26 @@ function shouldMarkAttentionUnread(
   );
 }
 
+function toolMessageToEventData(content: string): string {
+  try {
+    const obj = JSON.parse(content);
+    if (obj && typeof obj === "object") {
+      if ("name" in obj && "result" in obj) {
+        return content;
+      }
+      if (obj.role === "tool") {
+        return JSON.stringify({
+          name: obj.tool_call_id ? `tool ${obj.tool_call_id}` : "tool",
+          result: obj.content ?? "",
+        });
+      }
+    }
+  } catch {
+    // Legacy/plain tool output.
+  }
+  return JSON.stringify({ name: "tool", result: content });
+}
+
 function messageToEvent(m: Message): StreamEvent {
   switch (m.role) {
     case "user":
@@ -39,7 +59,7 @@ function messageToEvent(m: Message): StreamEvent {
     case "tool_call":
       return { type: "tool_call", data: m.content };
     case "tool":
-      return { type: "tool_result", data: m.content };
+      return { type: "tool_result", data: toolMessageToEventData(m.content) };
     case "system":
       return { type: "status", data: m.content };
     case "agent":

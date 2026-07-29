@@ -73,14 +73,15 @@ function formatToolData(
       };
     }
     if (type === "tool_result") {
-      const result = obj.result;
+      const name = obj.name ?? obj.tool_call_id ?? "tool";
+      const result = obj.result ?? obj.content ?? "";
       const resultLine =
         typeof result === "string" ? result : JSON.stringify(result);
       const resultBlock =
         typeof result === "string" ? result : JSON.stringify(result, null, 2);
       return {
-        summary: `${obj.name} → ${resultLine}`,
-        full: `${obj.name} →\n${resultBlock}`,
+        summary: `${name} → ${resultLine}`,
+        full: `${name} →\n${resultBlock}`,
       };
     }
   } catch {
