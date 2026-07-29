@@ -360,6 +360,274 @@ GET /api/v1/plugins/instances/{instance_id}/logs
 WS  /api/v1/plugins/instances/{instance_id}/stream
 ```
 
+## 前端改造建议
+
+前端需要基于 `scope` 区分插件入口位置：
+
+- `system_side`：进入后台插件管理页面，支持创建实例、启动/停止、查看状态和日志。
+- `session_side`：进入创建 session 页面，作为本次 session 的可选能力。第一阶段后端还未实现，可以先只在 UI 设计里预留。
+- `hybrid`：同时出现在后台插件管理和创建 session 页面。
+
+第一阶段建议先实现 `system_side` 插件管理。
+
+### 页面结构
+
+建议新增一个插件管理入口，例如：
+
+```text
+/plugins
+```
+
+页面可以分成三个区域：
+
+```text
+Installed Plugins     # 来自 /plugins/catalog
+Plugin Instances      # 来自 /plugins/instances
+Instance Detail       # 状态、runs、logs、配置
+```
+
+`Installed Plugins` 展示本地已安装插件定义：
+
+- `name`
+- `id`
+- `version`
+- `scope`
+- `provider`
+- `description`
+- `capabilities`
+- `subscriptions`
+- `actions`
+
+对于 `scope == "system_side"` 或 `scope == "hybrid"` 的插件，显示“创建实例”按钮。
+
+`Plugin Instances` 展示已经创建的实例：
+
+- `display_name`
+- `plugin_id`
+- `status`
+- `auto_start`
+- `current_run_id`
+- `created_at`
+- `updated_at`
+
+每个实例需要操作按钮：
+
+```text
+Start
+Stop
+Restart
+Edit Config
+Delete
+View Logs
+View Runs
+```
+
+按钮状态建议按实例状态控制：
+
+```text
+stopped/exited/errored/cancelled -> 可以 Start / Edit / Delete
+starting/waiting_input/running/stopping -> 禁止 Edit / Delete
+running -> 可以 Stop / Restart
+```
+
+### API 调用流程
+
+页面加载时：
+
+```text
+GET /api/v1/plugins/catalog
+GET /api/v1/plugins/instances
+```
+
+创建实例时：
+
+```text
+POST /api/v1/plugins/instances
+```
+
+请求体：
+
+```json
+{
+  "plugin_id": "wechat-bridge",
+  "display_name": "我的微信转发",
+  "config": {
+    "command_prefix": "\\cmd",
+    "default_session_id": "session-id",
+    "bindings": []
+  },
+  "auto_start": false
+}
+```
+
+启动实例：
+
+```text
+POST /api/v1/plugins/instances/{instance_id}/start
+```
+
+停止实例：
+
+```text
+POST /api/v1/plugins/instances/{instance_id}/stop
+```
+
+重启实例：
+
+```text
+POST /api/v1/plugins/instances/{instance_id}/restart
+```
+
+更新实例配置：
+
+```text
+PUT /api/v1/plugins/instances/{instance_id}
+```
+
+查看运行历史：
+
+```text
+GET /api/v1/plugins/instances/{instance_id}/runs
+```
+
+查看日志：
+
+```text
+GET /api/v1/plugins/instances/{instance_id}/logs
+GET /api/v1/plugins/runs/{run_id}/logs
+```
+
+实时日志和状态流：
+
+```text
+WS /api/v1/plugins/instances/{instance_id}/stream
+```
+
+WebSocket 当前会发送：
+
+```json
+{"type":"plugin_instance_state","data":{...}}
+{"type":"log","data":{"ts":"...","stream":"stdout","line":"..."}}
+{"type":"status","data":{"status":"running","run_id":"..."}}
+```
+
+### 状态展示
+
+前端应统一识别这些状态：
+
+```text
+stopped
+starting
+waiting_input
+running
+stopping
+exited
+errored
+cancelled
+```
+
+建议视觉语义：
+
+- `running`：正常运行。
+- `starting` / `stopping`：进行中。
+- `waiting_input`：等待用户操作，第一阶段暂时不会触发。
+- `exited`：已正常退出。
+- `errored`：错误，需要展示 `plugin_runs.error` 或日志中的 stderr。
+- `cancelled`：用户取消。
+
+### 日志界面
+
+日志界面建议支持：
+
+- 按 `stream` 区分 `stdout/stderr/system/event`。
+- 默认打开当前实例的实时日志流。
+- 可以切换查看历史 run 日志。
+- stderr 和 system error 使用更醒目的样式。
+- 日志列表需要虚拟滚动或至少限制最大渲染行数。
+
+第一阶段不需要做日志搜索、下载、清理和保留策略。
+
+### 微信插件配置 UI
+
+`wechat-bridge` 的配置可以先做成表单：
+
+```text
+Display Name
+Auto Start
+Command Prefix
+Default Session
+Bindings
+```
+
+`Default Session` 应该从现有 session 列表中选择，保存为 `default_session_id`。
+
+`Bindings` 是多行配置：
+
+```text
+wechat_user_id    session_id
+```
+
+其中 `session_id` 也应该从 session 列表选择。`wechat_user_id` 第一阶段可以让用户手动输入，因为当前插件会在日志里打印：
+
+```text
+收到消息，user_id = ...
+```
+
+用户可以先启动插件、给微信发一条消息、从日志里复制 `user_id`，再回到配置里添加绑定。
+
+更好的后续体验是：前端从插件日志或未来的 structured event 中识别最近出现的微信用户，提供“一键绑定到 session”。
+
+### 创建实例后的推荐操作流
+
+微信插件第一版操作流：
+
+```text
+1. 打开 Plugins 页面。
+2. 在 Installed Plugins 找到 WeChat Bridge。
+3. 创建实例，填写 default_session_id 或 bindings。
+4. 点击 Start。
+5. WeChatBot() 初始化并处理扫码登录。
+6. 在日志中确认 Logged in 和 Long-poll started。
+7. 从微信发消息。
+8. 插件输出 session.message.send action。
+9. 目标 session 的 Agent 回复后，插件收到 message.created 并 bot.send 回微信。
+```
+
+如果没有 live session runner，插件消息会先写入数据库，但不会触发 Agent 继续回复。前端需要提示：
+
+```text
+目标 session 必须是 live/running 状态，插件消息才能触发 Agent 回复。
+```
+
+### session_side 插件的前端预留
+
+未来创建 session 页面可以增加插件选择区：
+
+```text
+Session Plugins
+[ ] Codex Chrome
+[ ] OpenClaw Browser
+[ ] GitHub MCP
+```
+
+筛选条件：
+
+```text
+scope == "session_side" or scope == "hybrid"
+session.selectable == true
+```
+
+第一阶段后端还没有 `session_plugins` 表，也没有 session 启动时加载插件的逻辑，所以前端可以先不实现，或者只在设计中预留区域。
+
+### 错误处理
+
+前端需要重点处理：
+
+- `404`：插件定义或实例不存在，刷新 catalog/instances。
+- `409`：实例正在运行，不能编辑或重复启动。
+- 启动后很快 `errored`：自动打开日志，展示 stderr tail 或 run error。
+- WebSocket 断开：回退到轮询 `GET /instances/{id}/logs`。
+
 ## Codex/OpenClaw 插件的兼容方向
 
 Codex/OpenClaw 这类插件通常属于 `session_side`，用于给某个 session 增加工具能力或 skill，而不是作为全局后台服务运行。
