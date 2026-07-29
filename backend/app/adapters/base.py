@@ -10,7 +10,12 @@ if TYPE_CHECKING:
 class StreamEventType(str, Enum):
     USER = "user"
     TEXT = "text"
+    # Internal persistence event: data is the raw OpenAI assistant message JSON.
+    # The runner stores it but does not broadcast it to UI subscribers.
+    ASSISTANT_MESSAGE = "assistant_message"
     TOOL_CALL = "tool_call"
+    # Internal persistence event: data is the raw OpenAI tool message JSON.
+    TOOL_MESSAGE = "tool_message"
     # Emitted before a tool that isn't auto-approved runs; the adapter blocks on
     # a human decision routed back via resolve_decision. data is JSON
     # {call_id, name, args}.

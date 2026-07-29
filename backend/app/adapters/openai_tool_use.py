@@ -98,15 +98,11 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
         """Rebuild conversation context after a backend restart, using OpenAI's
         native tool roles.
 
-        Persisted rows use our own vocabulary (user/agent/tool_call/tool) and we
-        never stored OpenAI's tool_call_id. The runner always writes each
-        TOOL_CALL immediately followed by its TOOL result, in order, so we
-        re-pair them by adjacency and synthesize a stable id — producing a valid
-        assistant(tool_calls) -> tool(tool_call_id) sequence the API accepts.
-        Two fidelity limits: tool results were truncated to _TOOL_RESULT_MAX when
-        persisted, and a turn interrupted before its result was stored gets a
-        placeholder response so the tool_call still has a match. The system
-        prompt seeded in start() is preserved (SYSTEM rows aren't persisted).
+        New persisted rows keep OpenAI-native assistant/tool message JSON in the
+        existing agent/tool roles, preserving assistant(content + tool_calls) and
+        tool_call_id values. Older rows may still use split tool_call/tool records;
+        those are repaired by adjacency with synthesized ids. The system prompt
+        seeded in start() is preserved (SYSTEM rows aren't persisted).
         """
         restored: list[dict] = []
         i = 0
@@ -118,7 +114,7 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                 restored.append({"role": "user", "content": m.content})
                 i += 1
             elif m.role == MessageRole.AGENT:
-                restored.append({"role": "assistant", "content": m.content})
+                restored.append(self._parse_persisted_assistant_message(m.content))
                 i += 1
             elif m.role == MessageRole.TOOL_CALL:
                 name, arguments = self._parse_persisted_tool_call(m.content)
@@ -147,12 +143,16 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                 })
                 i += 1
             elif m.role == MessageRole.TOOL:
-                # Orphan result with no preceding call — can't attach a tool role
-                # without a matching id, so keep it as plain assistant context.
-                restored.append({
-                    "role": "assistant",
-                    "content": f"[previous tool result] {m.content}",
-                })
+                tool_message = self._parse_persisted_tool_message(m.content)
+                if tool_message is not None:
+                    restored.append(tool_message)
+                else:
+                    # Legacy orphan result with no preceding call — can't attach a
+                    # tool role without a matching id, so keep it as plain assistant context.
+                    restored.append({
+                        "role": "assistant",
+                        "content": f"[previous tool result] {m.content}",
+                    })
                 i += 1
             else:
                 i += 1
@@ -161,6 +161,26 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
             "restored %d history rows -> %d context messages (total=%d)",
             n, len(restored), len(self._messages),
         )
+
+    @staticmethod
+    def _parse_persisted_assistant_message(content: str) -> dict:
+        try:
+            obj = json.loads(content)
+        except json.JSONDecodeError:
+            return {"role": "assistant", "content": content}
+        if isinstance(obj, dict) and obj.get("role") == "assistant":
+            return obj
+        return {"role": "assistant", "content": content}
+
+    @staticmethod
+    def _parse_persisted_tool_message(content: str) -> dict | None:
+        try:
+            obj = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(obj, dict) and obj.get("role") == "tool" and obj.get("tool_call_id"):
+            return obj
+        return None
 
     @staticmethod
     def _parse_persisted_tool_call(content: str) -> tuple[str, str]:
@@ -247,12 +267,18 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
 
             choice = response.choices[0]
             msg = choice.message
-            self._messages.append(msg.model_dump(exclude_unset=False))
+            assistant_message = msg.model_dump(exclude_unset=False)
+            self._messages.append(assistant_message)
             logger.debug(
                 "assistant reply: content_len=%s tool_calls=%d finish=%s",
                 len(msg.content) if msg.content else 0,
                 len(msg.tool_calls or []),
                 choice.finish_reason,
+            )
+
+            yield StreamEvent(
+                type=StreamEventType.ASSISTANT_MESSAGE,
+                data=json.dumps(assistant_message, ensure_ascii=False),
             )
 
             if msg.content:
@@ -318,11 +344,16 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                             logger.exception("tool %s raised", fn_name)
                             result = f"Error executing {fn_name}: {e}"
 
-                self._messages.append({
+                tool_message = {
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": result,
-                })
+                }
+                self._messages.append(tool_message)
+                yield StreamEvent(
+                    type=StreamEventType.TOOL_MESSAGE,
+                    data=json.dumps(tool_message, ensure_ascii=False),
+                )
 
                 result_view = (
                     result[:_TOOL_RESULT_MAX] + "\n...[truncated]"

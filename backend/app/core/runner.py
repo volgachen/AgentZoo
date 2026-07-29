@@ -128,6 +128,8 @@ class SessionRunner:
             yield ev
 
     def _broadcast(self, event: StreamEvent) -> None:
+        if event.type in (StreamEventType.ASSISTANT_MESSAGE, StreamEventType.TOOL_MESSAGE):
+            return
         for q in list(self._subscribers):
             try:
                 q.put_nowait(event)
@@ -172,6 +174,7 @@ class SessionRunner:
 
         self._generating = True
         agent_buf: list[str] = []
+        saw_native_messages = False
         errored = False
         awaiting_confirm = False
         try:
@@ -197,24 +200,35 @@ class SessionRunner:
                     await self._db.update_session_status(
                         self._session_id, SessionStatus.RUNNING
                     )
-                if event.type == StreamEventType.TEXT:
-                    agent_buf.append(event.data)
-                elif event.type == StreamEventType.TOOL_CALL:
-                    # Persist tool interactions as their own rows so history
-                    # (not just the live stream) shows what the agent did.
+                if event.type == StreamEventType.ASSISTANT_MESSAGE:
+                    saw_native_messages = True
                     await self._db.add_message(
-                        self._session_id, MessageRole.TOOL_CALL, event.data
+                        self._session_id, MessageRole.AGENT, event.data
                     )
-                elif event.type == StreamEventType.TOOL_RESULT:
+                    agent_buf.clear()
+                elif event.type == StreamEventType.TOOL_MESSAGE:
+                    saw_native_messages = True
                     await self._db.add_message(
                         self._session_id, MessageRole.TOOL, event.data
                     )
+                elif event.type == StreamEventType.TEXT:
+                    agent_buf.append(event.data)
+                elif event.type == StreamEventType.TOOL_CALL:
+                    if not saw_native_messages:
+                        await self._db.add_message(
+                            self._session_id, MessageRole.TOOL_CALL, event.data
+                        )
+                elif event.type == StreamEventType.TOOL_RESULT:
+                    if not saw_native_messages:
+                        await self._db.add_message(
+                            self._session_id, MessageRole.TOOL, event.data
+                        )
                 elif event.type == StreamEventType.ERROR:
                     errored = True
         finally:
             self._generating = False
 
-        if agent_buf:
+        if agent_buf and not saw_native_messages:
             await self._db.add_message(
                 self._session_id, MessageRole.AGENT, "\n".join(agent_buf)
             )
