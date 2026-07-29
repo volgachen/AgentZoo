@@ -244,20 +244,30 @@ async def plugin_instance_stream(
     runner = registry.get_or_create(instance_id, db)
     queue, snapshot, status = await runner.subscribe()
 
+    async def _send_json(frame: dict) -> bool:
+        try:
+            await ws.send_text(json.dumps(frame))
+            return True
+        except (WebSocketDisconnect, RuntimeError):
+            return False
+
     try:
-        await ws.send_text(json.dumps({
+        if not await _send_json({
             "type": "plugin_instance_state",
             "data": instance.model_dump(mode="json"),
-        }))
+        }):
+            return
         for entry in snapshot:
-            await ws.send_text(json.dumps({
+            if not await _send_json({
                 "type": "log",
                 "data": entry.model_dump(mode="json"),
-            }))
-        await ws.send_text(json.dumps({
+            }):
+                return
+        if not await _send_json({
             "type": "status",
             "data": {"status": status.value, "run_id": runner.run_id},
-        }))
+        }):
+            return
 
         async def _client_pinger() -> None:
             while True:
@@ -267,7 +277,8 @@ async def plugin_instance_stream(
         try:
             while True:
                 frame = await queue.get()
-                await ws.send_text(json.dumps(frame))
+                if not await _send_json(frame):
+                    return
         finally:
             pinger.cancel()
     except WebSocketDisconnect:

@@ -50,7 +50,7 @@ Turn history.
 | `session_id` | VARCHAR(36) | NOT NULL |
 | `role` | VARCHAR(20) | NOT NULL |
 | `content` | LONGTEXT | NOT NULL |
-| `from_session_id` | VARCHAR(36) | nullable |
+| `from_session_id` | VARCHAR(100) | nullable source id, for example another session id or `plugin:{instance_id}` |
 | `created_at` | DATETIME(3) | NOT NULL |
 
 Index: `idx_messages_session (session_id)`. FK: `session_id → sessions(id) ON DELETE CASCADE`.

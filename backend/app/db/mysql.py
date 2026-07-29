@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id       VARCHAR(36)  NOT NULL,
     role             VARCHAR(20)  NOT NULL,
     content          LONGTEXT     NOT NULL,
-    from_session_id  VARCHAR(36)  DEFAULT NULL,
+    from_session_id  VARCHAR(100) DEFAULT NULL,
     created_at       DATETIME(3)  NOT NULL,
     INDEX idx_messages_session (session_id),
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -420,6 +420,7 @@ class MySqlDatabase(IAgentDatabase):
         )
         await self._init_schema()
         await self._migrate_columns()
+        await self._migrate_column_types()
         await self._seed_agents()
 
     async def close(self) -> None:
@@ -453,6 +454,26 @@ class MySqlDatabase(IAgentDatabase):
                         if not exists:
                             for stmt in statements:
                                 await cur.execute(stmt)
+
+    async def _migrate_column_types(self) -> None:
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT CHARACTER_MAXIMUM_LENGTH
+                       FROM information_schema.columns
+                       WHERE table_schema = %s
+                         AND table_name = 'messages'
+                         AND column_name = 'from_session_id'""",
+                    (self._settings.mysql_database,),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    return
+                (max_len,) = row
+                if max_len is not None and max_len < 100:
+                    await cur.execute(
+                        "ALTER TABLE messages MODIFY COLUMN from_session_id VARCHAR(100) DEFAULT NULL"
+                    )
 
     async def _seed_agents(self) -> None:
         now = datetime.now(timezone.utc)
