@@ -100,6 +100,7 @@ class WeChatBridgePlugin:
         self.bot = WeChatBot()
         self.host = AgentZooHost()
         self._stop = asyncio.Event()
+        self._last_wechat_user_id: str | None = None
         self._register_handlers()
 
     def _register_handlers(self) -> None:
@@ -133,6 +134,7 @@ class WeChatBridgePlugin:
     async def on_wechat_message(self, *, wechat_user_id: str, text: str, raw_message: Any) -> None:
         print(f"收到消息，user_id = {wechat_user_id}", flush=True)
         print(f"消息内容 = {text}", flush=True)
+        self._last_wechat_user_id = wechat_user_id
 
         if text.startswith(self.config.command_prefix):
             await self.handle_command(
@@ -204,19 +206,36 @@ class WeChatBridgePlugin:
 
     async def on_agentzoo_message_created(self, event: dict[str, Any]) -> None:
         """Handle AgentZoo message.created events from stdin."""
+        print(f"received AgentZoo event: {event.get('type')} source={event.get('source')}", flush=True)
         source = event.get("source")
         if source == f"plugin:{os.getenv('AGENTZOO_PLUGIN_INSTANCE_ID')}":
+            print("ignored self-originated event", flush=True)
             return
         data = event.get("data", {})
         if data.get("role") != "agent":
+            print(f"ignored non-agent message role={data.get('role')}", flush=True)
             return
 
         session_id = data.get("session_id")
         content = data.get("content")
         if not session_id or not content:
+            print("ignored message.created without session_id/content", flush=True)
             return
 
-        for wechat_user_id in self.config.wechat_users_for_session(session_id):
+        target_user_ids = self.config.wechat_users_for_session(session_id)
+        if not target_user_ids and self._last_wechat_user_id:
+            target_user_ids = [self._last_wechat_user_id]
+            print(
+                f"no binding for session={session_id}; fallback to last user={self._last_wechat_user_id}",
+                flush=True,
+            )
+
+        if not target_user_ids:
+            print(f"no WeChat target for session={session_id}; reply ignored", flush=True)
+            return
+
+        for wechat_user_id in target_user_ids:
+            print(f"forwarding agent reply to wechat user={wechat_user_id}", flush=True)
             await self.bot.send(wechat_user_id, content)
 
 
