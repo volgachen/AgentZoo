@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Message, Session, StreamEvent, Task } from "../api/types";
+import type { Message, Session, SessionStatus, StreamEvent, Task } from "../api/types";
 import { api, createSessionSocket } from "../api/client";
 
 interface PendingConfirm {
@@ -14,12 +14,24 @@ interface SessionEntry {
   socket: WebSocket | null;
   generating: boolean;
   tasks: Task[];
+  // True when this background session newly needs user attention and has not
+  // been opened since that state change.
+  attentionUnread: boolean;
   // Tool calls awaiting a human approve/deny decision (see TOOL_CONFIRM).
   pendingConfirms: PendingConfirm[];
 }
 
 // Map a persisted Message into the StreamEvent shape the console renders, so
 // REST-loaded history and live WS events share one render path.
+function shouldMarkAttentionUnread(
+  previous: SessionStatus,
+  next: SessionStatus,
+): boolean {
+  return (
+    previous !== next && (next === "WAITING_USER" || next === "WAITING_CONFIRM")
+  );
+}
+
 function messageToEvent(m: Message): StreamEvent {
   switch (m.role) {
     case "user":
@@ -71,15 +83,45 @@ export const useStore = create<Store>((set, get) => {
         const entry = s.sessions[sessionId];
         if (!entry) return s;
         if (frame.type === "session_state") {
+          const nextSession = frame.data as Session;
+          const becameWaiting = shouldMarkAttentionUnread(
+            entry.session.status,
+            nextSession.status,
+          );
+          const isCurrent = s.activeSessionId === sessionId;
           return {
             sessions: {
               ...s.sessions,
-              [sessionId]: { ...entry, session: frame.data as Session },
+              [sessionId]: {
+                ...entry,
+                session: nextSession,
+                attentionUnread: isCurrent
+                  ? false
+                  : entry.attentionUnread || becameWaiting,
+              },
             },
           };
         }
         const isTerminal = frame.type === "done" || frame.type === "error";
         const isUser = frame.type === "user";
+        const inferredStatus: SessionStatus | null =
+          frame.type === "tool_confirm"
+            ? "WAITING_CONFIRM"
+            : frame.type === "done"
+              ? "WAITING_USER"
+              : frame.type === "error"
+                ? "ERROR"
+                : isUser
+                  ? "RUNNING"
+                  : null;
+        const nextSession = inferredStatus
+          ? { ...entry.session, status: inferredStatus }
+          : entry.session;
+        const isCurrent = s.activeSessionId === sessionId;
+        const becameWaiting = shouldMarkAttentionUnread(
+          entry.session.status,
+          nextSession.status,
+        );
 
         // A tool_confirm frame carries {call_id,name,args}: surface it in the
         // log AND enqueue an interactive approve/deny card.
@@ -116,8 +158,12 @@ export const useStore = create<Store>((set, get) => {
             ...s.sessions,
             [sessionId]: {
               ...entry,
+              session: nextSession,
               events: [...entry.events, frame as StreamEvent],
               pendingConfirms,
+              attentionUnread: isCurrent
+                ? false
+                : entry.attentionUnread || becameWaiting,
               generating: isTerminal
                 ? false
                 : isUser
@@ -151,7 +197,19 @@ export const useStore = create<Store>((set, get) => {
     sessions: {},
     activeSessionId: null,
 
-    setActiveSession: (id) => set({ activeSessionId: id }),
+    setActiveSession: (id) =>
+      set((s) => {
+        if (!id) return { activeSessionId: id };
+        const entry = s.sessions[id];
+        if (!entry) return { activeSessionId: id };
+        return {
+          activeSessionId: id,
+          sessions: {
+            ...s.sessions,
+            [id]: { ...entry, attentionUnread: false },
+          },
+        };
+      }),
 
     // Pull every session the gateway knows about and merge any we don't already
     // track into the store as display-only entries (no live socket). Sessions we
@@ -165,8 +223,27 @@ export const useStore = create<Store>((set, get) => {
         for (const session of remote) {
           const existing = next[session.id];
           next[session.id] = existing
-            ? { ...existing, session }
-            : { session, events: [], socket: null, generating: false, tasks: [], pendingConfirms: [] };
+            ? {
+                ...existing,
+                session,
+                attentionUnread:
+                  s.activeSessionId === session.id
+                    ? false
+                    : existing.attentionUnread ||
+                      shouldMarkAttentionUnread(
+                        existing.session.status,
+                        session.status,
+                      ),
+              }
+            : {
+                session,
+                events: [],
+                socket: null,
+                generating: false,
+                tasks: [],
+                attentionUnread: false,
+                pendingConfirms: [],
+              };
         }
         return { sessions: next };
       });
@@ -185,7 +262,18 @@ export const useStore = create<Store>((set, get) => {
       // StrictMode's double-invoke (and rapid re-navigation) hits this guard on
       // the second call instead of racing to create a duplicate stream.
       if (existing?.socket) {
-        set({ activeSessionId: sessionId });
+        set((s) => {
+          const entry = s.sessions[sessionId];
+          return {
+            activeSessionId: sessionId,
+            sessions: entry
+              ? {
+                  ...s.sessions,
+                  [sessionId]: { ...entry, attentionUnread: false },
+                }
+              : s.sessions,
+          };
+        });
         return;
       }
 
@@ -200,7 +288,7 @@ export const useStore = create<Store>((set, get) => {
           sessions: {
             ...s.sessions,
             [sessionId]: entry
-              ? { ...entry, socket }
+              ? { ...entry, socket, attentionUnread: false }
               // Placeholder until we fetch the record below; status is provisional.
               : {
                   session: {
@@ -220,6 +308,7 @@ export const useStore = create<Store>((set, get) => {
                   socket,
                   generating: false,
                   tasks: [],
+                  attentionUnread: false,
                   pendingConfirms: [],
                 },
           },
@@ -266,6 +355,7 @@ export const useStore = create<Store>((set, get) => {
             socket,
             generating: false,
             tasks: [],
+            attentionUnread: false,
             pendingConfirms: [],
           },
         },

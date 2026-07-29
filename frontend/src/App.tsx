@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useStore } from "./store/sessions";
 import { usePluginStore } from "./store/plugins";
@@ -11,6 +12,7 @@ const NAV = [
 
 export default function App() {
   const sessions = useStore((s) => s.sessions);
+  const setActiveSession = useStore((s) => s.setActiveSession);
   const sessionCount = Object.keys(sessions).length;
   const plugins = usePluginStore((s) => s.plugins);
   const runningPlugins = Object.values(plugins).filter(
@@ -19,6 +21,10 @@ export default function App() {
   // Highlight the session we're viewing (if the current route is a console).
   const match = useLocation().pathname.match(/^\/console\/(.+)$/);
   const currentSessionId = match?.[1];
+
+  useEffect(() => {
+    setActiveSession(currentSessionId ?? null);
+  }, [currentSessionId, setActiveSession]);
 
   return (
     <div className="h-screen overflow-hidden bg-gray-950 text-gray-100 flex flex-col">

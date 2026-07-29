@@ -35,8 +35,28 @@ export default function ActiveSessionsMenu({
 
   const active = Object.values(sessions)
     .filter((e) => isSocketLive(e.socket))
-    .map((e) => e.session)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    .sort((a, b) => {
+      const aUnread =
+        a.attentionUnread &&
+        a.session.id !== currentSessionId &&
+        (a.session.status === "WAITING_USER" ||
+          a.session.status === "WAITING_CONFIRM");
+      const bUnread =
+        b.attentionUnread &&
+        b.session.id !== currentSessionId &&
+        (b.session.status === "WAITING_USER" ||
+          b.session.status === "WAITING_CONFIRM");
+      if (aUnread !== bUnread) return Number(bUnread) - Number(aUnread);
+      return a.session.created_at.localeCompare(b.session.created_at);
+    });
+
+  const unreadAttention = active.filter(
+    (e) =>
+      e.attentionUnread &&
+      e.session.id !== currentSessionId &&
+      (e.session.status === "WAITING_USER" ||
+        e.session.status === "WAITING_CONFIRM"),
+  );
 
   const jump = (id: string) => {
     setOpen(false);
@@ -58,6 +78,11 @@ export default function ActiveSessionsMenu({
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400" />
         Active sessions
         <span className="text-gray-500">{active.length}</span>
+        {unreadAttention.length > 0 && (
+          <span className="rounded-full bg-orange-700 px-1.5 py-0.5 text-[10px] text-white">
+            {unreadAttention.length} new
+          </span>
+        )}
         <span className="text-gray-500 text-[10px]">▾</span>
       </button>
 
@@ -67,18 +92,31 @@ export default function ActiveSessionsMenu({
           {active.length === 0 ? (
             <p className="px-3 py-2 text-xs text-gray-500">No active sessions.</p>
           ) : (
-            active.map((s) => {
+            active.map((entry) => {
+              const s = entry.session;
               const isCurrent = s.id === currentSessionId;
+              const isUnreadAttention =
+                entry.attentionUnread &&
+                !isCurrent &&
+                (s.status === "WAITING_USER" ||
+                  s.status === "WAITING_CONFIRM");
               return (
                 <button
                   key={s.id}
                   type="button"
                   onClick={() => jump(s.id)}
                   className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-gray-800 ${
-                    isCurrent ? "bg-gray-800/60" : ""
+                    isCurrent
+                      ? "bg-gray-800/60"
+                      : isUnreadAttention
+                        ? "bg-orange-950/40"
+                        : ""
                   }`}
                 >
-                  <span className="text-xs text-gray-300 truncate">
+                  <span className="min-w-0 text-xs text-gray-300 truncate">
+                    {isUnreadAttention && (
+                      <span className="mr-1 text-orange-400">●</span>
+                    )}
                     {s.title ?? `${s.id.slice(0, 8)}…`}
                     {isCurrent && (
                       <span className="ml-1 text-[10px] text-indigo-400">
