@@ -5,9 +5,10 @@ from app.db.seed_browser import browser_agent_template as _browser_agent
 from app.models.domain import (
     AgentTemplate, AgentType, Session, SessionStatus,
     Message, MessageRole,
-    Plugin, PluginStatus,
+    PluginInstance, PluginLog, PluginRun, PluginStatus,
     Task, TaskStatus,
 )
+from app.plugins.events import PluginEvent, get_plugin_event_bus
 
 
 _SEED_AGENTS = [
@@ -73,7 +74,10 @@ class MockMemoryDatabase(IAgentDatabase):
         self._agents: Dict[str, AgentTemplate] = {a.id: a for a in _SEED_AGENTS}
         self._sessions: Dict[str, Session] = {}
         self._messages: Dict[str, List[Message]] = {}
-        self._plugins: Dict[str, Plugin] = {}
+        self._plugin_instances: Dict[str, PluginInstance] = {}
+        self._plugin_runs: Dict[str, PluginRun] = {}
+        self._plugin_logs: Dict[int, PluginLog] = {}
+        self._plugin_log_counter = 0
         # tasks keyed by task_list_id -> task_id -> Task
         self._tasks: Dict[str, Dict[str, Task]] = {}
         # monotonic per-list id counter; survives deletes (ids never reused)
@@ -188,71 +192,171 @@ class MockMemoryDatabase(IAgentDatabase):
         )
         self._messages[session_id].append(message)
         session.last_message_at = message.created_at
+        await get_plugin_event_bus().publish(PluginEvent(
+            type="message.created",
+            source=from_session_id or "agentzoo",
+            data=message.model_dump(mode="json"),
+        ))
         return message
 
     async def get_messages(self, session_id: str) -> List[Message]:
         await self.get_session(session_id)
         return list(self._messages[session_id])
 
-    # ------- Plugins -------
+    # ------- Plugin instances/runs/logs -------
 
-    async def list_plugins(self) -> List[Plugin]:
-        return list(self._plugins.values())
+    async def list_plugin_instances(self) -> List[PluginInstance]:
+        return sorted(self._plugin_instances.values(), key=lambda p: p.created_at)
 
-    async def get_plugin(self, plugin_id: str) -> Plugin:
-        plugin = self._plugins.get(plugin_id)
-        if plugin is None:
-            raise KeyError(f"Plugin '{plugin_id}' not found")
-        return plugin
+    async def get_plugin_instance(self, instance_id: str) -> PluginInstance:
+        instance = self._plugin_instances.get(instance_id)
+        if instance is None:
+            raise KeyError(f"Plugin instance '{instance_id}' not found")
+        return instance
 
-    async def create_plugin(self, name: str, code: str) -> Plugin:
-        plugin = Plugin(name=name, code=code)
-        self._plugins[plugin.id] = plugin
-        return plugin
-
-    async def update_plugin(
+    async def create_plugin_instance(
         self,
         plugin_id: str,
+        display_name: str,
         *,
-        name: str | None = None,
-        code: str | None = None,
-    ) -> Plugin:
-        plugin = await self.get_plugin(plugin_id)
-        if name is not None:
-            plugin.name = name
-        if code is not None:
-            plugin.code = code
-        plugin.updated_at = datetime.now(timezone.utc)
-        return plugin
+        config: dict | None = None,
+        auto_start: bool = False,
+    ) -> PluginInstance:
+        instance = PluginInstance(
+            plugin_id=plugin_id,
+            display_name=display_name,
+            config=config,
+            auto_start=auto_start,
+        )
+        self._plugin_instances[instance.id] = instance
+        return instance
 
-    async def delete_plugin(self, plugin_id: str) -> None:
-        await self.get_plugin(plugin_id)
-        del self._plugins[plugin_id]
-
-    async def set_plugin_status(
+    async def update_plugin_instance(
         self,
-        plugin_id: str,
-        status: PluginStatus,
+        instance_id: str,
         *,
-        exit_code: int | None = None,
-        error: str | None = None,
-    ) -> Plugin:
-        plugin = await self.get_plugin(plugin_id)
+        display_name: str | None = None,
+        config: dict | None = None,
+        auto_start: bool | None = None,
+        status: PluginStatus | None = None,
+        current_run_id: str | None = None,
+    ) -> PluginInstance:
+        instance = await self.get_plugin_instance(instance_id)
+        if display_name is not None:
+            instance.display_name = display_name
+        if config is not None:
+            instance.config = config
+        if auto_start is not None:
+            instance.auto_start = auto_start
+        if status is not None:
+            instance.status = status
+        if current_run_id is not None:
+            instance.current_run_id = current_run_id
+        instance.updated_at = datetime.now(timezone.utc)
+        return instance
+
+    async def delete_plugin_instance(self, instance_id: str) -> None:
+        await self.get_plugin_instance(instance_id)
+        del self._plugin_instances[instance_id]
+        run_ids = [r.id for r in self._plugin_runs.values() if r.plugin_instance_id == instance_id]
+        for run_id in run_ids:
+            del self._plugin_runs[run_id]
+        for log_id, log in list(self._plugin_logs.items()):
+            if log.plugin_instance_id == instance_id:
+                del self._plugin_logs[log_id]
+
+    async def create_plugin_run(
+        self,
+        plugin_instance_id: str,
+        plugin_id: str,
+        *,
+        config_snapshot: dict | None = None,
+    ) -> PluginRun:
+        await self.get_plugin_instance(plugin_instance_id)
         now = datetime.now(timezone.utc)
-        plugin.status = status
-        if status == PluginStatus.RUNNING:
-            plugin.last_started_at = now
-            plugin.last_exited_at = None
-            plugin.last_exit_code = None
-            plugin.last_error = None
-        else:
-            plugin.last_exited_at = now
-            if exit_code is not None:
-                plugin.last_exit_code = exit_code
-            if error is not None:
-                plugin.last_error = error
-        plugin.updated_at = now
-        return plugin
+        run = PluginRun(
+            plugin_instance_id=plugin_instance_id,
+            plugin_id=plugin_id,
+            config_snapshot=config_snapshot,
+            started_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        self._plugin_runs[run.id] = run
+        return run
+
+    async def get_plugin_run(self, run_id: str) -> PluginRun:
+        run = self._plugin_runs.get(run_id)
+        if run is None:
+            raise KeyError(f"Plugin run '{run_id}' not found")
+        return run
+
+    async def list_plugin_runs(self, plugin_instance_id: str) -> List[PluginRun]:
+        await self.get_plugin_instance(plugin_instance_id)
+        runs = [r for r in self._plugin_runs.values() if r.plugin_instance_id == plugin_instance_id]
+        return sorted(runs, key=lambda r: r.created_at, reverse=True)
+
+    async def update_plugin_run(
+        self,
+        run_id: str,
+        *,
+        status: PluginStatus | None = None,
+        running_at = _UNSET,
+        exited_at = _UNSET,
+        exit_code = _UNSET,
+        error = _UNSET,
+    ) -> PluginRun:
+        run = await self.get_plugin_run(run_id)
+        if status is not None:
+            run.status = status
+        if running_at is not _UNSET:
+            run.running_at = running_at
+        if exited_at is not _UNSET:
+            run.exited_at = exited_at
+        if exit_code is not _UNSET:
+            run.exit_code = exit_code
+        if error is not _UNSET:
+            run.error = error
+        run.updated_at = datetime.now(timezone.utc)
+        return run
+
+    async def add_plugin_log(
+        self,
+        plugin_instance_id: str,
+        plugin_run_id: str,
+        stream: str,
+        line: str,
+        *,
+        level: str | None = None,
+    ) -> PluginLog:
+        await self.get_plugin_instance(plugin_instance_id)
+        await self.get_plugin_run(plugin_run_id)
+        self._plugin_log_counter += 1
+        log = PluginLog(
+            id=self._plugin_log_counter,
+            plugin_instance_id=plugin_instance_id,
+            plugin_run_id=plugin_run_id,
+            stream=stream,
+            level=level,
+            line=line,
+        )
+        self._plugin_logs[log.id] = log
+        return log
+
+    async def list_plugin_logs(
+        self,
+        *,
+        plugin_instance_id: str | None = None,
+        plugin_run_id: str | None = None,
+        limit: int = 500,
+    ) -> List[PluginLog]:
+        logs = list(self._plugin_logs.values())
+        if plugin_instance_id is not None:
+            logs = [l for l in logs if l.plugin_instance_id == plugin_instance_id]
+        if plugin_run_id is not None:
+            logs = [l for l in logs if l.plugin_run_id == plugin_run_id]
+        logs.sort(key=lambda l: (l.ts, l.id or 0))
+        return logs[-limit:]
 
     # ------- Tasks -------
 

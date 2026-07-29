@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, List
 from app.models.domain import (
     AgentTemplate, Session, SessionStatus, Message, MessageRole,
-    Plugin, PluginStatus, Task, TaskStatus,
+    PluginInstance, PluginLog, PluginRun, PluginStatus, Task, TaskStatus,
 )
 
 # Sentinel for update_task(owner=...) so callers can distinguish "leave owner
@@ -74,37 +74,84 @@ class IAgentDatabase(ABC):
     @abstractmethod
     async def get_messages(self, session_id: str) -> List[Message]: pass
 
-    # ------- Plugins -------
+    # ------- Plugin instances/runs/logs -------
     @abstractmethod
-    async def list_plugins(self) -> List[Plugin]: pass
+    async def list_plugin_instances(self) -> List[PluginInstance]: pass
 
     @abstractmethod
-    async def get_plugin(self, plugin_id: str) -> Plugin: pass
+    async def get_plugin_instance(self, instance_id: str) -> PluginInstance: pass
 
     @abstractmethod
-    async def create_plugin(self, name: str, code: str) -> Plugin: pass
-
-    @abstractmethod
-    async def update_plugin(
+    async def create_plugin_instance(
         self,
         plugin_id: str,
+        display_name: str,
         *,
-        name: str | None = None,
-        code: str | None = None,
-    ) -> Plugin: pass
+        config: dict | None = None,
+        auto_start: bool = False,
+    ) -> PluginInstance: pass
 
     @abstractmethod
-    async def delete_plugin(self, plugin_id: str) -> None: pass
-
-    @abstractmethod
-    async def set_plugin_status(
+    async def update_plugin_instance(
         self,
-        plugin_id: str,
-        status: PluginStatus,
+        instance_id: str,
         *,
-        exit_code: int | None = None,
-        error: str | None = None,
-    ) -> Plugin: pass
+        display_name: str | None = None,
+        config: dict | None = None,
+        auto_start: bool | None = None,
+        status: PluginStatus | None = None,
+        current_run_id: str | None = None,
+    ) -> PluginInstance: pass
+
+    @abstractmethod
+    async def delete_plugin_instance(self, instance_id: str) -> None: pass
+
+    @abstractmethod
+    async def create_plugin_run(
+        self,
+        plugin_instance_id: str,
+        plugin_id: str,
+        *,
+        config_snapshot: dict | None = None,
+    ) -> PluginRun: pass
+
+    @abstractmethod
+    async def get_plugin_run(self, run_id: str) -> PluginRun: pass
+
+    @abstractmethod
+    async def list_plugin_runs(self, plugin_instance_id: str) -> List[PluginRun]: pass
+
+    @abstractmethod
+    async def update_plugin_run(
+        self,
+        run_id: str,
+        *,
+        status: PluginStatus | None = None,
+        running_at: Any = _UNSET,
+        exited_at: Any = _UNSET,
+        exit_code: Any = _UNSET,
+        error: Any = _UNSET,
+    ) -> PluginRun: pass
+
+    @abstractmethod
+    async def add_plugin_log(
+        self,
+        plugin_instance_id: str,
+        plugin_run_id: str,
+        stream: str,
+        line: str,
+        *,
+        level: str | None = None,
+    ) -> PluginLog: pass
+
+    @abstractmethod
+    async def list_plugin_logs(
+        self,
+        *,
+        plugin_instance_id: str | None = None,
+        plugin_run_id: str | None = None,
+        limit: int = 500,
+    ) -> List[PluginLog]: pass
 
     # ------- Tasks -------
     @abstractmethod

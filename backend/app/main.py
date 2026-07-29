@@ -8,15 +8,34 @@ setup_logging()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.db.deps import init_db, close_db
+from app.db.deps import get_db, init_db, close_db
+from app.plugins.catalog import get_plugin_catalog
+from app.plugins.events import get_plugin_event_bus
+from app.plugins.registry import get_plugin_registry
+from app.plugins.service import (
+    auto_start_plugin_instances,
+    recover_interrupted_plugin_runs,
+    register_plugin_event_delivery,
+    stop_running_plugin_instances,
+)
 from app.routers import agents, sessions, fs, plugins, tools, tasks
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    yield
-    await close_db()
+    db = get_db()
+    registry = get_plugin_registry()
+    catalog = get_plugin_catalog()
+    event_bus = get_plugin_event_bus()
+    register_plugin_event_delivery(event_bus, db, registry, catalog)
+    await recover_interrupted_plugin_runs(db)
+    # await auto_start_plugin_instances(db, registry, catalog)
+    try:
+        yield
+    finally:
+        await stop_running_plugin_instances(db, registry)
+        await close_db()
 
 
 app = FastAPI(title="Agent Gateway", version="0.1.0", lifespan=lifespan)

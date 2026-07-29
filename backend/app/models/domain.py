@@ -1,6 +1,6 @@
 from enum import Enum
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 import uuid
 
@@ -113,19 +113,48 @@ class Task(BaseModel):
 
 class PluginStatus(str, Enum):
     STOPPED = "stopped"
+    STARTING = "starting"
+    WAITING_INPUT = "waiting_input"
     RUNNING = "running"
+    STOPPING = "stopping"
     EXITED = "exited"
     ERRORED = "errored"
+    CANCELLED = "cancelled"
 
 
-class Plugin(BaseModel):
+class PluginInstance(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    code: str
+    plugin_id: str
+    display_name: str
     status: PluginStatus = PluginStatus.STOPPED
-    last_started_at: Optional[datetime] = None
-    last_exited_at: Optional[datetime] = None
-    last_exit_code: Optional[int] = None
-    last_error: Optional[str] = None
+    config: dict[str, Any] | None = None
+    auto_start: bool = False
+    current_run_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PluginRun(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    plugin_instance_id: str
+    plugin_id: str
+    status: PluginStatus = PluginStatus.STARTING
+    config_snapshot: dict[str, Any] | None = None
+    started_at: datetime | None = None
+    running_at: datetime | None = None
+    exited_at: datetime | None = None
+    exit_code: int | None = None
+    error: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PluginLog(BaseModel):
+    id: int | None = None
+    plugin_instance_id: str
+    plugin_run_id: str
+    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    stream: str
+    level: str | None = None
+    line: str
+

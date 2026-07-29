@@ -1,0 +1,37 @@
+{
+  "id": "wechat-bridge",
+  "name": "WeChat Bridge",
+  "version": "0.1.0",
+  "scope": "system_side",
+  "provider": "agentzoo",
+  "description": "Forward messages between WeChat and AgentZoo sessions using the wechatbot.WeChatBot runtime.",
+  "entry": {
+    "type": "python",
+    "main": "src/main.py"
+  },
+  "capabilities": [
+    "background",
+    "network",
+    "wechat_login"
+  ],
+  "subscriptions": [
+    "message.created"
+  ],
+  "actions": [
+    "session.message.send"
+  ],
+  "dependencies": {
+    "python": [
+      "wechatbot"
+    ]
+  },
+  "default_config": {
+    "command_prefix": "\\cmd",
+    "default_session_id": null,
+    "bindings": []
+  },
+  "session": {
+    "selectable": false,
+    "default_enabled": false
+  }
+}

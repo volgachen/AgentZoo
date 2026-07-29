@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -8,23 +9,30 @@ from pathlib import Path
 from typing import Any
 
 from app.db.interface import IAgentDatabase
-from app.models.domain import PluginStatus
+from app.models.domain import PluginInstance, PluginRun, PluginStatus
+from app.plugins.actions import PluginActionDispatcher
+from app.plugins.catalog import PluginDefinition
+from app.plugins.events import PluginEvent
 from app.plugins.log_buffer import LogBuffer, LogLine
 
 
 logger = logging.getLogger("agentzoo.plugin")
 
-# backend/app/plugins/runner.py -> app/plugins -> app -> backend
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
-_PLUGIN_SOURCES_DIR = _BACKEND_DIR / ".plugins"
 
 
 class PluginRunner:
-    """Owns the lifecycle of a single plugin's python subprocess."""
+    """Owns the lifecycle of one plugin instance's current run."""
 
-    def __init__(self, plugin_id: str, db: IAgentDatabase) -> None:
-        self.plugin_id = plugin_id
+    def __init__(
+        self,
+        instance_id: str,
+        db: IAgentDatabase,
+        action_dispatcher: PluginActionDispatcher | None = None,
+    ) -> None:
+        self.instance_id = instance_id
         self._db = db
+        self._action_dispatcher = action_dispatcher
         self._proc: asyncio.subprocess.Process | None = None
         self._buffer = LogBuffer()
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -33,10 +41,11 @@ class PluginRunner:
         self._stopping = False
         self._status: PluginStatus = PluginStatus.STOPPED
         self._last_error: str | None = None
+        self._run_id: str | None = None
 
-    # ------------------------------------------------------------------
-    # Public lifecycle
-    # ------------------------------------------------------------------
+    def set_action_dispatcher(self, action_dispatcher: PluginActionDispatcher | None) -> None:
+        if action_dispatcher is not None:
+            self._action_dispatcher = action_dispatcher
 
     @property
     def status(self) -> PluginStatus:
@@ -44,55 +53,124 @@ class PluginRunner:
 
     @property
     def is_running(self) -> bool:
-        return self._status == PluginStatus.RUNNING
+        return self._status in {
+            PluginStatus.STARTING,
+            PluginStatus.WAITING_INPUT,
+            PluginStatus.RUNNING,
+            PluginStatus.STOPPING,
+        }
 
-    async def start(self, code: str) -> None:
+    @property
+    def run_id(self) -> str | None:
+        return self._run_id
+
+    async def start(
+        self,
+        definition: PluginDefinition,
+        instance: PluginInstance,
+    ) -> PluginRun:
         async with self._lock:
             if self.is_running:
-                raise RuntimeError("plugin is already running")
+                raise RuntimeError("plugin instance is already running")
+            if definition.entry.type != "python":
+                raise RuntimeError(
+                    f"plugin entry type '{definition.entry.type}' is not runnable as a background process yet"
+                )
+            if not definition.entry.main:
+                raise RuntimeError("python plugin entry requires entry.main")
 
-            _PLUGIN_SOURCES_DIR.mkdir(parents=True, exist_ok=True)
-            source_path = _PLUGIN_SOURCES_DIR / f"{self.plugin_id}.py"
-            source_path.write_text(code, encoding="utf-8")
+            source_path = (Path(definition.root) / definition.entry.main).resolve()
+            root = Path(definition.root).resolve()
+            if not source_path.is_file():
+                raise RuntimeError(f"plugin entry file not found: {source_path}")
+            if root not in source_path.parents and source_path != root:
+                raise RuntimeError("plugin entry must be inside plugin root")
 
+            self._buffer.clear()
             self._stopping = False
             self._last_error = None
+            self._status = PluginStatus.STARTING
+
+            run = await self._db.create_plugin_run(
+                instance.id,
+                instance.plugin_id,
+                config_snapshot=instance.config,
+            )
+            self._run_id = run.id
+            await self._db.update_plugin_instance(
+                instance.id,
+                status=PluginStatus.STARTING,
+                current_run_id=run.id,
+            )
             await self._record_system(f"── start @ {datetime.now(timezone.utc).isoformat()} ──")
+            await self._broadcast_status()
 
             try:
-                # -u: unbuffered stdout so prints stream in real time.
-                # start_new_session: own process group, so stop() can take the whole tree.
+                env = os.environ.copy()
+                env.update({
+                    "AGENTZOO_PLUGIN_ID": definition.id,
+                    "AGENTZOO_PLUGIN_INSTANCE_ID": instance.id,
+                    "AGENTZOO_PLUGIN_RUN_ID": run.id,
+                    "AGENTZOO_PLUGIN_ROOT": str(root),
+                    "AGENTZOO_PLUGIN_CONFIG": json.dumps(instance.config or {}, ensure_ascii=False),
+                })
                 self._proc = await asyncio.create_subprocess_exec(
-                    sys.executable, "-u", str(source_path),
-                    cwd=str(_BACKEND_DIR),
+                    sys.executable,
+                    "-u",
+                    str(source_path),
+                    cwd=str(root),
+                    stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     start_new_session=True,
+                    env=env,
                 )
             except OSError as e:
                 self._last_error = f"failed to spawn: {e}"
-                await self._record_system(self._last_error)
                 self._status = PluginStatus.ERRORED
-                await self._db.set_plugin_status(
-                    self.plugin_id, PluginStatus.ERRORED, error=self._last_error,
+                now = datetime.now(timezone.utc)
+                await self._record_system(self._last_error)
+                await self._db.update_plugin_run(
+                    run.id,
+                    status=PluginStatus.ERRORED,
+                    exited_at=now,
+                    error=self._last_error,
                 )
+                await self._db.update_plugin_instance(instance.id, status=PluginStatus.ERRORED)
                 await self._broadcast_status()
-                return
+                return await self._db.get_plugin_run(run.id)
 
             self._status = PluginStatus.RUNNING
-            await self._db.set_plugin_status(self.plugin_id, PluginStatus.RUNNING)
+            now = datetime.now(timezone.utc)
+            await self._db.update_plugin_run(
+                run.id,
+                status=PluginStatus.RUNNING,
+                running_at=now,
+            )
+            await self._db.update_plugin_instance(instance.id, status=PluginStatus.RUNNING)
             await self._broadcast_status()
 
-            self._wait_task = asyncio.create_task(self._supervise())
+            self._wait_task = asyncio.create_task(self._supervise(instance.id, run.id))
+            return await self._db.get_plugin_run(run.id)
 
     async def stop(self) -> None:
         async with self._lock:
             if not self.is_running or self._proc is None:
                 return
             self._stopping = True
-            pid = self._proc.pid
+            self._status = PluginStatus.STOPPING
+            run_id = self._run_id
+            if run_id is not None:
+                await self._db.update_plugin_run(run_id, status=PluginStatus.STOPPING)
+            await self._db.update_plugin_instance(self.instance_id, status=PluginStatus.STOPPING)
+            await self._broadcast_status()
+            proc = self._proc
+            pid = proc.pid
             try:
-                os.killpg(pid, signal.SIGTERM)
+                if hasattr(os, "killpg"):
+                    os.killpg(pid, signal.SIGTERM)
+                else:
+                    proc.terminate()
             except ProcessLookupError:
                 pass
             wait_task = self._wait_task
@@ -104,21 +182,15 @@ class PluginRunner:
         except asyncio.TimeoutError:
             if self._proc is not None:
                 try:
-                    os.killpg(self._proc.pid, signal.SIGKILL)
+                    if hasattr(os, "killpg"):
+                        os.killpg(self._proc.pid, signal.SIGKILL)
+                    else:
+                        self._proc.kill()
                 except ProcessLookupError:
                     pass
             await wait_task
 
-    # ------------------------------------------------------------------
-    # Subscription (WS endpoint uses these)
-    # ------------------------------------------------------------------
-
     async def subscribe(self) -> tuple[asyncio.Queue[dict[str, Any]], list[LogLine], PluginStatus]:
-        """Attach a subscriber. Returns (queue, log snapshot, current status).
-
-        The caller should first send the snapshot + status frames, then drain the
-        queue for live updates.
-        """
         async with self._lock:
             q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
             self._subscribers.add(q)
@@ -136,24 +208,36 @@ class PluginRunner:
             self._buffer.clear()
         await self._broadcast({"type": "logs_cleared", "data": None})
 
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
+    async def send_event(self, event: PluginEvent) -> None:
+        async with self._lock:
+            proc = self._proc
+            if proc is None or proc.stdin is None or not self.is_running:
+                return
+            frame = {
+                "type": "event",
+                "event": event.model_dump(mode="json"),
+            }
+            try:
+                proc.stdin.write((json.dumps(frame, ensure_ascii=False) + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+            except Exception as e:
+                logger.exception("failed to send plugin event instance=%s", self.instance_id)
+                await self._record_system(f"event delivery failed: {event.type}: {e}")
 
-    async def _supervise(self) -> None:
+    async def _supervise(self, instance_id: str, run_id: str) -> None:
         assert self._proc is not None
         proc = self._proc
         readers = []
         if proc.stdout is not None:
-            readers.append(self._pump(proc.stdout, "stdout"))
+            readers.append(self._pump(proc.stdout, "stdout", instance_id, run_id))
         if proc.stderr is not None:
-            readers.append(self._pump(proc.stderr, "stderr"))
+            readers.append(self._pump(proc.stderr, "stderr", instance_id, run_id))
 
         await asyncio.gather(*readers)
         rc = await proc.wait()
 
         if self._stopping:
-            final = PluginStatus.STOPPED
+            final = PluginStatus.EXITED
             err = None
         elif rc == 0:
             final = PluginStatus.EXITED
@@ -169,27 +253,70 @@ class PluginRunner:
             self._proc = None
 
         await self._record_system(f"── exited rc={rc} status={final.value} ──")
-        await self._db.set_plugin_status(
-            self.plugin_id, final, exit_code=rc, error=err,
+        now = datetime.now(timezone.utc)
+        await self._db.update_plugin_run(
+            run_id,
+            status=final,
+            exited_at=now,
+            exit_code=rc,
+            error=err,
         )
+        await self._db.update_plugin_instance(instance_id, status=final)
         await self._broadcast_status()
 
-    async def _pump(self, stream: asyncio.StreamReader, name: str) -> None:
+    async def _pump(
+        self,
+        stream: asyncio.StreamReader,
+        name: str,
+        instance_id: str,
+        run_id: str,
+    ) -> None:
         while True:
             try:
                 line_bytes = await stream.readline()
             except Exception as e:
-                logger.exception("plugin=%s pump %s read failed", self.plugin_id, name)
+                logger.exception("plugin_instance=%s pump %s read failed", instance_id, name)
                 await self._record_system(f"pump error: {e}")
                 return
             if not line_bytes:
                 return
-            line = line_bytes.decode("utf-8", errors="replace").rstrip("\n")
+            line = line_bytes.decode("utf-8", errors="replace").rstrip("\r\n")
             entry = self._buffer.append(name, line)  # type: ignore[arg-type]
+            await self._db.add_plugin_log(instance_id, run_id, name, line)
             await self._broadcast({"type": "log", "data": entry.model_dump(mode="json")})
+            if name == "stdout":
+                await self._maybe_dispatch_action(instance_id, run_id, line)
+
+    async def _maybe_dispatch_action(self, instance_id: str, run_id: str, line: str) -> None:
+        if self._action_dispatcher is None:
+            return
+        try:
+            frame = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(frame, dict) or frame.get("type") != "action":
+            return
+        action = frame.get("action")
+        data = frame.get("data") or {}
+        if not isinstance(action, str) or not isinstance(data, dict):
+            await self._record_system("invalid plugin action frame")
+            return
+        try:
+            await self._action_dispatcher.dispatch(
+                plugin_instance_id=instance_id,
+                plugin_run_id=run_id,
+                action=action,
+                data=data,
+            )
+            await self._record_system(f"action dispatched: {action}")
+        except Exception as e:
+            logger.exception("plugin action failed instance=%s action=%s", instance_id, action)
+            await self._record_system(f"action failed: {action}: {e}")
 
     async def _record_system(self, message: str) -> None:
         entry = self._buffer.append("system", message)
+        if self._run_id is not None:
+            await self._db.add_plugin_log(self.instance_id, self._run_id, "system", message)
         await self._broadcast({"type": "log", "data": entry.model_dump(mode="json")})
 
     async def _broadcast(self, frame: dict[str, Any]) -> None:
@@ -205,5 +332,6 @@ class PluginRunner:
             "data": {
                 "status": self._status.value,
                 "error": self._last_error,
+                "run_id": self._run_id,
             },
         })

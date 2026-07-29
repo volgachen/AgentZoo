@@ -2,12 +2,15 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from app.adapters.registry import AdapterRegistry, get_registry as get_session_registry
 from app.db.deps import get_db
 from app.db.interface import IAgentDatabase
-from app.models.domain import Plugin, PluginStatus
+from app.models.domain import PluginInstance, PluginLog, PluginRun, PluginStatus
+from app.plugins.actions import PluginActionDispatcher
+from app.plugins.catalog import PluginCatalog, PluginDefinition, get_plugin_catalog
 from app.plugins.registry import PluginRunnerRegistry, get_plugin_registry
 
 
@@ -15,191 +18,236 @@ logger = logging.getLogger("agentzoo.plugins")
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 
-class CreatePluginRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    code: str = ""
+class CreatePluginInstanceRequest(BaseModel):
+    plugin_id: str = Field(min_length=1, max_length=200)
+    display_name: str = Field(min_length=1, max_length=200)
+    config: dict | None = None
+    auto_start: bool = False
 
 
-class UpdatePluginRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    code: str | None = None
+class UpdatePluginInstanceRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    config: dict | None = None
+    auto_start: bool | None = None
 
 
-@router.get("", response_model=list[Plugin])
-async def list_plugins(db: IAgentDatabase = Depends(get_db)):
-    return await db.list_plugins()
-
-
-@router.post("", response_model=Plugin, status_code=201)
-async def create_plugin(
-    body: CreatePluginRequest,
-    db: IAgentDatabase = Depends(get_db),
+@router.get("/catalog", response_model=list[PluginDefinition])
+async def list_plugin_catalog(
+    catalog: PluginCatalog = Depends(get_plugin_catalog),
 ):
-    return await db.create_plugin(name=body.name, code=body.code)
+    return catalog.list()
 
 
-@router.get("/{plugin_id}", response_model=Plugin)
-async def get_plugin(plugin_id: str, db: IAgentDatabase = Depends(get_db)):
+@router.get("/catalog/{plugin_id}", response_model=PluginDefinition)
+async def get_plugin_definition(
+    plugin_id: str,
+    catalog: PluginCatalog = Depends(get_plugin_catalog),
+):
     try:
-        return await db.get_plugin(plugin_id)
+        return catalog.get(plugin_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.put("/{plugin_id}", response_model=Plugin)
-async def update_plugin(
-    plugin_id: str,
-    body: UpdatePluginRequest,
+@router.get("/instances", response_model=list[PluginInstance])
+async def list_plugin_instances(db: IAgentDatabase = Depends(get_db)):
+    return await db.list_plugin_instances()
+
+
+@router.post("/instances", response_model=PluginInstance, status_code=201)
+async def create_plugin_instance(
+    body: CreatePluginInstanceRequest,
+    db: IAgentDatabase = Depends(get_db),
+    catalog: PluginCatalog = Depends(get_plugin_catalog),
+):
+    try:
+        catalog.get(body.plugin_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return await db.create_plugin_instance(
+        plugin_id=body.plugin_id,
+        display_name=body.display_name,
+        config=body.config,
+        auto_start=body.auto_start,
+    )
+
+
+@router.get("/instances/{instance_id}", response_model=PluginInstance)
+async def get_plugin_instance(instance_id: str, db: IAgentDatabase = Depends(get_db)):
+    try:
+        return await db.get_plugin_instance(instance_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.put("/instances/{instance_id}", response_model=PluginInstance)
+async def update_plugin_instance(
+    instance_id: str,
+    body: UpdatePluginInstanceRequest,
+    db: IAgentDatabase = Depends(get_db),
+):
+    try:
+        instance = await db.get_plugin_instance(instance_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if instance.status in {
+        PluginStatus.STARTING,
+        PluginStatus.WAITING_INPUT,
+        PluginStatus.RUNNING,
+        PluginStatus.STOPPING,
+    }:
+        raise HTTPException(status_code=409, detail="Stop the plugin instance before editing it.")
+    return await db.update_plugin_instance(
+        instance_id,
+        display_name=body.display_name,
+        config=body.config,
+        auto_start=body.auto_start,
+    )
+
+
+@router.delete("/instances/{instance_id}", status_code=204)
+async def delete_plugin_instance(
+    instance_id: str,
     db: IAgentDatabase = Depends(get_db),
     registry: PluginRunnerRegistry = Depends(get_plugin_registry),
 ):
     try:
-        plugin = await db.get_plugin(plugin_id)
+        await db.get_plugin_instance(instance_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-    if body.code is not None and plugin.status == PluginStatus.RUNNING:
-        raise HTTPException(
-            status_code=409,
-            detail="Stop the plugin before editing its code.",
-        )
-
-    return await db.update_plugin(plugin_id, name=body.name, code=body.code)
+    await registry.remove(instance_id)
+    await db.delete_plugin_instance(instance_id)
 
 
-@router.delete("/{plugin_id}", status_code=204)
-async def delete_plugin(
-    plugin_id: str,
+@router.post("/instances/{instance_id}/start", response_model=PluginRun)
+async def start_plugin_instance(
+    instance_id: str,
     db: IAgentDatabase = Depends(get_db),
     registry: PluginRunnerRegistry = Depends(get_plugin_registry),
+    catalog: PluginCatalog = Depends(get_plugin_catalog),
+    session_registry: AdapterRegistry = Depends(get_session_registry),
 ):
     try:
-        await db.get_plugin(plugin_id)
+        instance = await db.get_plugin_instance(instance_id)
+        definition = catalog.get(instance.plugin_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    await registry.remove(plugin_id)
-    await db.delete_plugin(plugin_id)
-
-
-@router.post("/{plugin_id}/start", response_model=Plugin)
-async def start_plugin(
-    plugin_id: str,
-    db: IAgentDatabase = Depends(get_db),
-    registry: PluginRunnerRegistry = Depends(get_plugin_registry),
-):
-    try:
-        plugin = await db.get_plugin(plugin_id)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    runner = registry.get_or_create(plugin_id, db)
+    dispatcher = PluginActionDispatcher(db, session_registry)
+    runner = registry.get_or_create(instance_id, db, dispatcher)
     if runner.is_running:
-        raise HTTPException(status_code=409, detail="plugin already running")
+        raise HTTPException(status_code=409, detail="plugin instance already running")
 
     try:
-        await runner.start(plugin.code)
+        return await runner.start(definition, instance)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    return await db.get_plugin(plugin_id)
 
-
-@router.post("/{plugin_id}/stop", response_model=Plugin)
-async def stop_plugin(
-    plugin_id: str,
+@router.post("/instances/{instance_id}/stop", response_model=PluginInstance)
+async def stop_plugin_instance(
+    instance_id: str,
     db: IAgentDatabase = Depends(get_db),
     registry: PluginRunnerRegistry = Depends(get_plugin_registry),
 ):
     try:
-        await db.get_plugin(plugin_id)
+        await db.get_plugin_instance(instance_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-    runner = registry.get(plugin_id)
+    runner = registry.get(instance_id)
     if runner is not None:
         await runner.stop()
-    return await db.get_plugin(plugin_id)
+    return await db.get_plugin_instance(instance_id)
 
 
-@router.post("/{plugin_id}/restart", response_model=Plugin)
-async def restart_plugin(
-    plugin_id: str,
+@router.post("/instances/{instance_id}/restart", response_model=PluginRun)
+async def restart_plugin_instance(
+    instance_id: str,
     db: IAgentDatabase = Depends(get_db),
     registry: PluginRunnerRegistry = Depends(get_plugin_registry),
+    catalog: PluginCatalog = Depends(get_plugin_catalog),
+    session_registry: AdapterRegistry = Depends(get_session_registry),
 ):
     try:
-        plugin = await db.get_plugin(plugin_id)
+        instance = await db.get_plugin_instance(instance_id)
+        definition = catalog.get(instance.plugin_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-    runner = registry.get_or_create(plugin_id, db)
+    dispatcher = PluginActionDispatcher(db, session_registry)
+    runner = registry.get_or_create(instance_id, db, dispatcher)
     if runner.is_running:
         await runner.stop()
-    plugin = await db.get_plugin(plugin_id)
+        instance = await db.get_plugin_instance(instance_id)
     try:
-        await runner.start(plugin.code)
+        return await runner.start(definition, instance)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    return await db.get_plugin(plugin_id)
 
 
-@router.get("/{plugin_id}/logs")
-async def get_plugin_logs(
-    plugin_id: str,
-    db: IAgentDatabase = Depends(get_db),
-    registry: PluginRunnerRegistry = Depends(get_plugin_registry),
-):
+@router.get("/instances/{instance_id}/runs", response_model=list[PluginRun])
+async def list_plugin_runs(instance_id: str, db: IAgentDatabase = Depends(get_db)):
     try:
-        await db.get_plugin(plugin_id)
+        return await db.list_plugin_runs(instance_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    runner = registry.get(plugin_id)
-    if runner is None:
-        return {"lines": []}
-    snapshot = runner.snapshot_logs()
-    return {"lines": [l.model_dump(mode="json") for l in snapshot]}
 
-
-@router.post("/{plugin_id}/logs/clear", status_code=204)
-async def clear_plugin_logs(
-    plugin_id: str,
-    db: IAgentDatabase = Depends(get_db),
-    registry: PluginRunnerRegistry = Depends(get_plugin_registry),
-):
+@router.get("/runs/{run_id}", response_model=PluginRun)
+async def get_plugin_run(run_id: str, db: IAgentDatabase = Depends(get_db)):
     try:
-        await db.get_plugin(plugin_id)
+        return await db.get_plugin_run(run_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    runner = registry.get(plugin_id)
-    if runner is not None:
-        await runner.clear_logs()
+
+@router.get("/runs/{run_id}/logs", response_model=list[PluginLog])
+async def get_plugin_run_logs(
+    run_id: str,
+    limit: int = Query(default=500, ge=1, le=5000),
+    db: IAgentDatabase = Depends(get_db),
+):
+    try:
+        await db.get_plugin_run(run_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return await db.list_plugin_logs(plugin_run_id=run_id, limit=limit)
 
 
-@router.websocket("/{plugin_id}/stream")
-async def plugin_stream(
-    plugin_id: str,
+@router.get("/instances/{instance_id}/logs", response_model=list[PluginLog])
+async def get_plugin_instance_logs(
+    instance_id: str,
+    limit: int = Query(default=500, ge=1, le=5000),
+    db: IAgentDatabase = Depends(get_db),
+):
+    try:
+        await db.get_plugin_instance(instance_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return await db.list_plugin_logs(plugin_instance_id=instance_id, limit=limit)
+
+
+@router.websocket("/instances/{instance_id}/stream")
+async def plugin_instance_stream(
+    instance_id: str,
     ws: WebSocket,
     db: IAgentDatabase = Depends(get_db),
     registry: PluginRunnerRegistry = Depends(get_plugin_registry),
 ):
     await ws.accept()
     try:
-        plugin = await db.get_plugin(plugin_id)
+        instance = await db.get_plugin_instance(instance_id)
     except KeyError:
-        await ws.send_text(json.dumps({"type": "error", "data": f"plugin '{plugin_id}' not found"}))
+        await ws.send_text(json.dumps({"type": "error", "data": f"plugin instance '{instance_id}' not found"}))
         await ws.close()
         return
 
-    runner = registry.get_or_create(plugin_id, db)
+    runner = registry.get_or_create(instance_id, db)
     queue, snapshot, status = await runner.subscribe()
 
     try:
         await ws.send_text(json.dumps({
-            "type": "plugin_state",
-            "data": plugin.model_dump(mode="json"),
+            "type": "plugin_instance_state",
+            "data": instance.model_dump(mode="json"),
         }))
         for entry in snapshot:
             await ws.send_text(json.dumps({
@@ -208,11 +256,10 @@ async def plugin_stream(
             }))
         await ws.send_text(json.dumps({
             "type": "status",
-            "data": {"status": status.value},
+            "data": {"status": status.value, "run_id": runner.run_id},
         }))
 
         async def _client_pinger() -> None:
-            # Drain client messages so disconnects are noticed promptly.
             while True:
                 await ws.receive_text()
 
@@ -226,6 +273,6 @@ async def plugin_stream(
     except WebSocketDisconnect:
         pass
     except Exception:
-        logger.exception("plugin WS error plugin=%s", plugin_id)
+        logger.exception("plugin WS error instance=%s", instance_id)
     finally:
         await runner.unsubscribe(queue)
