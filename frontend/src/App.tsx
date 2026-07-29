@@ -59,7 +59,7 @@ export default function App() {
       </nav>
 
       {/* Page content */}
-      <main className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+      <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <Outlet />
       </main>
     </div>

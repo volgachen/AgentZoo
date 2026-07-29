@@ -160,11 +160,11 @@ export default function SessionDashboard() {
   const rows = buildForest(entries);
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-semibold text-white mb-6">Sessions</h1>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead>
+    <div className="p-6 flex flex-col min-h-0 flex-1">
+      <h1 className="text-2xl font-semibold text-white mb-6 shrink-0">Sessions</h1>
+      <div className="flex-1 min-h-0 overflow-auto">
+        <table className="w-full min-w-[56rem] text-sm text-left">
+          <thead className="sticky top-0 z-10 bg-gray-950">
             <tr className="text-gray-400 border-b border-gray-700">
               <th className="pb-3 pr-4 font-medium">Active</th>
               <th className="pb-3 pr-4 font-medium">Title</th>
