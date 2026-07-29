@@ -86,17 +86,69 @@ export interface Task {
   updated_at: string;
 }
 
-export type PluginStatus = "stopped" | "running" | "exited" | "errored";
+export type PluginScope = "system_side" | "session_side" | "hybrid";
 
-export interface Plugin {
+export type PluginStatus =
+  | "stopped"
+  | "starting"
+  | "waiting_input"
+  | "running"
+  | "stopping"
+  | "exited"
+  | "errored"
+  | "cancelled";
+
+export interface PluginEntrySpec {
+  type: string;
+  main: string | null;
+  skill: string | null;
+  scripts_dir: string | null;
+}
+
+export interface PluginSessionSpec {
+  selectable: boolean;
+  default_enabled: boolean;
+}
+
+export interface PluginDefinition {
   id: string;
   name: string;
-  code: string;
+  version: string;
+  scope: PluginScope;
+  provider: string;
+  description: string;
+  entry: PluginEntrySpec;
+  capabilities: string[];
+  subscriptions: string[];
+  actions: string[];
+  default_config: Record<string, unknown>;
+  session: PluginSessionSpec;
+  root: string;
+}
+
+export interface PluginInstance {
+  id: string;
+  plugin_id: string;
+  display_name: string;
   status: PluginStatus;
-  last_started_at: string | null;
-  last_exited_at: string | null;
-  last_exit_code: number | null;
-  last_error: string | null;
+  config: Record<string, unknown> | null;
+  auto_start: boolean;
+  current_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginRun {
+  id: string;
+  plugin_instance_id: string;
+  plugin_id: string;
+  status: PluginStatus;
+  config_snapshot: Record<string, unknown> | null;
+  started_at: string | null;
+  running_at: string | null;
+  exited_at: string | null;
+  exit_code: number | null;
+  error: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -104,14 +156,18 @@ export interface Plugin {
 export type PluginLogStream = "stdout" | "stderr" | "system";
 
 export interface PluginLogLine {
+  id?: number | null;
+  plugin_instance_id?: string;
+  plugin_run_id?: string;
   ts: string;
   stream: PluginLogStream;
+  level?: string | null;
   line: string;
 }
 
 export type PluginWsFrame =
-  | { type: "plugin_state"; data: Plugin }
+  | { type: "plugin_instance_state"; data: PluginInstance }
   | { type: "log"; data: PluginLogLine }
-  | { type: "status"; data: { status: PluginStatus; error?: string | null } }
+  | { type: "status"; data: { status: PluginStatus; error?: string | null; run_id?: string | null } }
   | { type: "logs_cleared"; data: null }
   | { type: "error"; data: string };

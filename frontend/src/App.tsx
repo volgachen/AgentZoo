@@ -14,9 +14,9 @@ export default function App() {
   const sessions = useStore((s) => s.sessions);
   const setActiveSession = useStore((s) => s.setActiveSession);
   const sessionCount = Object.keys(sessions).length;
-  const plugins = usePluginStore((s) => s.plugins);
-  const runningPlugins = Object.values(plugins).filter(
-    (p) => p.plugin.status === "running",
+  const instances = usePluginStore((s) => s.instances);
+  const runningPlugins = Object.values(instances).filter(
+    (instance) => instance.status === "running",
   ).length;
   // Highlight the session we're viewing (if the current route is a console).
   const match = useLocation().pathname.match(/^\/console\/(.+)$/);

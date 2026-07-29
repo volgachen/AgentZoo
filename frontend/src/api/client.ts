@@ -3,8 +3,10 @@ import type {
   AgentType,
   Session,
   Message,
-  Plugin,
+  PluginDefinition,
+  PluginInstance,
   PluginLogLine,
+  PluginRun,
   Task,
 } from "./types";
 
@@ -22,6 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const detail = await res.text();
     throw new Error(`${res.status} ${detail}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -41,6 +44,10 @@ function browseQuery(path: string | null | undefined): string {
   return path ? `?path=${encodeURIComponent(path)}` : "";
 }
 
+function limitQuery(limit?: number): string {
+  return limit == null ? "" : `?limit=${encodeURIComponent(String(limit))}`;
+}
+
 export interface CreateAgentPayload {
   name: string;
   description: string;
@@ -52,6 +59,19 @@ export interface CreateAgentPayload {
 }
 
 export type UpdateAgentPayload = Partial<Omit<CreateAgentPayload, "agent_type">>;
+
+export interface CreatePluginInstancePayload {
+  plugin_id: string;
+  display_name: string;
+  config?: Record<string, unknown> | null;
+  auto_start?: boolean;
+}
+
+export interface UpdatePluginInstancePayload {
+  display_name?: string;
+  config?: Record<string, unknown> | null;
+  auto_start?: boolean;
+}
 
 export const api = {
   agents: {
@@ -106,30 +126,35 @@ export const api = {
     home: () => request<{ home: string; templates_root: string }>("/fs/home"),
   },
   plugins: {
-    list: () => request<Plugin[]>("/plugins"),
-    get: (id: string) => request<Plugin>(`/plugins/${id}`),
-    create: (name: string, code: string) =>
-      request<Plugin>("/plugins", {
+    catalog: () => request<PluginDefinition[]>("/plugins/catalog"),
+    definition: (id: string) => request<PluginDefinition>(`/plugins/catalog/${id}`),
+    instances: () => request<PluginInstance[]>("/plugins/instances"),
+    instance: (id: string) => request<PluginInstance>(`/plugins/instances/${id}`),
+    createInstance: (body: CreatePluginInstancePayload) =>
+      request<PluginInstance>("/plugins/instances", {
         method: "POST",
-        body: JSON.stringify({ name, code }),
+        body: JSON.stringify(body),
       }),
-    update: (id: string, body: { name?: string; code?: string }) =>
-      request<Plugin>(`/plugins/${id}`, {
+    updateInstance: (id: string, body: UpdatePluginInstancePayload) =>
+      request<PluginInstance>(`/plugins/instances/${id}`, {
         method: "PUT",
         body: JSON.stringify(body),
       }),
-    delete: (id: string) =>
-      request<void>(`/plugins/${id}`, { method: "DELETE" }),
-    start: (id: string) =>
-      request<Plugin>(`/plugins/${id}/start`, { method: "POST" }),
-    stop: (id: string) =>
-      request<Plugin>(`/plugins/${id}/stop`, { method: "POST" }),
-    restart: (id: string) =>
-      request<Plugin>(`/plugins/${id}/restart`, { method: "POST" }),
-    logs: (id: string) =>
-      request<{ lines: PluginLogLine[] }>(`/plugins/${id}/logs`),
-    clearLogs: (id: string) =>
-      request<void>(`/plugins/${id}/logs/clear`, { method: "POST" }),
+    deleteInstance: (id: string) =>
+      request<void>(`/plugins/instances/${id}`, { method: "DELETE" }),
+    startInstance: (id: string) =>
+      request<PluginRun>(`/plugins/instances/${id}/start`, { method: "POST" }),
+    stopInstance: (id: string) =>
+      request<PluginInstance>(`/plugins/instances/${id}/stop`, { method: "POST" }),
+    restartInstance: (id: string) =>
+      request<PluginRun>(`/plugins/instances/${id}/restart`, { method: "POST" }),
+    runs: (instanceId: string) =>
+      request<PluginRun[]>(`/plugins/instances/${instanceId}/runs`),
+    run: (runId: string) => request<PluginRun>(`/plugins/runs/${runId}`),
+    runLogs: (runId: string, limit?: number) =>
+      request<PluginLogLine[]>(`/plugins/runs/${runId}/logs${limitQuery(limit)}`),
+    instanceLogs: (instanceId: string, limit?: number) =>
+      request<PluginLogLine[]>(`/plugins/instances/${instanceId}/logs${limitQuery(limit)}`),
   },
 };
 
@@ -137,6 +162,6 @@ export function createSessionSocket(sessionId: string): WebSocket {
   return new WebSocket(`${WS_BASE}/sessions/${sessionId}/stream`);
 }
 
-export function createPluginSocket(pluginId: string): WebSocket {
-  return new WebSocket(`${WS_BASE}/plugins/${pluginId}/stream`);
+export function createPluginSocket(instanceId: string): WebSocket {
+  return new WebSocket(`${WS_BASE}/plugins/instances/${instanceId}/stream`);
 }

@@ -1,158 +1,190 @@
 import { create } from "zustand";
-import type { Plugin, PluginLogLine, PluginWsFrame } from "../api/types";
+import type {
+  PluginDefinition,
+  PluginInstance,
+  PluginLogLine,
+  PluginRun,
+  PluginWsFrame,
+} from "../api/types";
 import { api, createPluginSocket } from "../api/client";
-
-interface PluginEntry {
-  plugin: Plugin;
-  logs: PluginLogLine[];
-  socket: WebSocket | null;
-}
+import type { CreatePluginInstancePayload, UpdatePluginInstancePayload } from "../api/client";
 
 interface Store {
-  plugins: Record<string, PluginEntry>;
+  catalog: PluginDefinition[];
+  instances: Record<string, PluginInstance>;
+  runsByInstance: Record<string, PluginRun[]>;
+  logsByInstance: Record<string, PluginLogLine[]>;
+  sockets: Record<string, WebSocket | null>;
   loaded: boolean;
 
   loadPlugins: () => Promise<void>;
-  createPlugin: (name: string, code: string) => Promise<string>;
-  updatePlugin: (id: string, body: { name?: string; code?: string }) => Promise<void>;
-  deletePlugin: (id: string) => Promise<void>;
-  startPlugin: (id: string) => Promise<void>;
-  stopPlugin: (id: string) => Promise<void>;
-  restartPlugin: (id: string) => Promise<void>;
-  clearLogs: (id: string) => Promise<void>;
+  loadRuns: (instanceId: string) => Promise<void>;
+  loadInstanceLogs: (instanceId: string, limit?: number) => Promise<void>;
+  loadRunLogs: (runId: string, limit?: number) => Promise<PluginLogLine[]>;
+  createInstance: (body: CreatePluginInstancePayload) => Promise<string>;
+  updateInstance: (id: string, body: UpdatePluginInstancePayload) => Promise<void>;
+  deleteInstance: (id: string) => Promise<void>;
+  startInstance: (id: string) => Promise<void>;
+  stopInstance: (id: string) => Promise<void>;
+  restartInstance: (id: string) => Promise<void>;
   subscribe: (id: string) => Promise<void>;
   unsubscribe: (id: string) => void;
 }
 
+export const ACTIVE_PLUGIN_STATUSES = new Set([
+  "starting",
+  "waiting_input",
+  "running",
+  "stopping",
+]);
+
 export const usePluginStore = create<Store>((set, get) => ({
-  plugins: {},
+  catalog: [],
+  instances: {},
+  runsByInstance: {},
+  logsByInstance: {},
+  sockets: {},
   loaded: false,
 
   loadPlugins: async () => {
-    const list = await api.plugins.list();
+    const [catalog, instances] = await Promise.all([
+      api.plugins.catalog(),
+      api.plugins.instances(),
+    ]);
     set((s) => {
-      const next: Record<string, PluginEntry> = {};
-      for (const p of list) {
-        const existing = s.plugins[p.id];
-        next[p.id] = existing
-          ? { ...existing, plugin: p }
-          : { plugin: p, logs: [], socket: null };
+      const nextInstances: Record<string, PluginInstance> = {};
+      const nextSockets: Record<string, WebSocket | null> = {};
+      for (const instance of instances) {
+        nextInstances[instance.id] = instance;
+        nextSockets[instance.id] = s.sockets[instance.id] ?? null;
       }
-      return { plugins: next, loaded: true };
+      return {
+        catalog,
+        instances: nextInstances,
+        sockets: nextSockets,
+        loaded: true,
+      };
     });
   },
 
-  createPlugin: async (name, code) => {
-    const p = await api.plugins.create(name, code);
+  loadRuns: async (instanceId) => {
+    const runs = await api.plugins.runs(instanceId);
     set((s) => ({
-      plugins: {
-        ...s.plugins,
-        [p.id]: { plugin: p, logs: [], socket: null },
-      },
+      runsByInstance: { ...s.runsByInstance, [instanceId]: runs },
     }));
-    return p.id;
   },
 
-  updatePlugin: async (id, body) => {
-    const p = await api.plugins.update(id, body);
-    set((s) => {
-      const entry = s.plugins[id];
-      if (!entry) return s;
-      return {
-        plugins: { ...s.plugins, [id]: { ...entry, plugin: p } },
-      };
-    });
+  loadInstanceLogs: async (instanceId, limit = 200) => {
+    const logs = await api.plugins.instanceLogs(instanceId, limit);
+    set((s) => ({
+      logsByInstance: { ...s.logsByInstance, [instanceId]: logs },
+    }));
   },
 
-  deletePlugin: async (id) => {
+  loadRunLogs: async (runId, limit = 1000) => api.plugins.runLogs(runId, limit),
+
+  createInstance: async (body) => {
+    const instance = await api.plugins.createInstance(body);
+    set((s) => ({
+      instances: { ...s.instances, [instance.id]: instance },
+      sockets: { ...s.sockets, [instance.id]: null },
+    }));
+    return instance.id;
+  },
+
+  updateInstance: async (id, body) => {
+    const instance = await api.plugins.updateInstance(id, body);
+    applyInstance(set, instance);
+  },
+
+  deleteInstance: async (id) => {
     get().unsubscribe(id);
-    await api.plugins.delete(id);
+    await api.plugins.deleteInstance(id);
     set((s) => {
-      const next = { ...s.plugins };
-      delete next[id];
-      return { plugins: next };
+      const instances = { ...s.instances };
+      const runsByInstance = { ...s.runsByInstance };
+      const logsByInstance = { ...s.logsByInstance };
+      const sockets = { ...s.sockets };
+      delete instances[id];
+      delete runsByInstance[id];
+      delete logsByInstance[id];
+      delete sockets[id];
+      return { instances, runsByInstance, logsByInstance, sockets };
     });
   },
 
-  startPlugin: async (id) => {
-    const p = await api.plugins.start(id);
-    applyPlugin(set, id, p);
-  },
-  stopPlugin: async (id) => {
-    const p = await api.plugins.stop(id);
-    applyPlugin(set, id, p);
-  },
-  restartPlugin: async (id) => {
-    const p = await api.plugins.restart(id);
-    applyPlugin(set, id, p);
+  startInstance: async (id) => {
+    await api.plugins.startInstance(id);
+    const instance = await api.plugins.instance(id);
+    applyInstance(set, instance);
+    void get().loadRuns(id);
   },
 
-  clearLogs: async (id) => {
-    await api.plugins.clearLogs(id);
-    set((s) => {
-      const entry = s.plugins[id];
-      if (!entry) return s;
-      return {
-        plugins: { ...s.plugins, [id]: { ...entry, logs: [] } },
-      };
-    });
+  stopInstance: async (id) => {
+    const instance = await api.plugins.stopInstance(id);
+    applyInstance(set, instance);
+    void get().loadRuns(id);
+  },
+
+  restartInstance: async (id) => {
+    await api.plugins.restartInstance(id);
+    const instance = await api.plugins.instance(id);
+    applyInstance(set, instance);
+    void get().loadRuns(id);
   },
 
   subscribe: async (id) => {
-    const existing = get().plugins[id];
-    if (existing?.socket) return;
+    const existingSocket = get().sockets[id];
+    if (existingSocket) return;
 
-    if (!existing) {
-      const p = await api.plugins.get(id);
-      set((s) => ({
-        plugins: {
-          ...s.plugins,
-          [id]: { plugin: p, logs: [], socket: null },
-        },
-      }));
+    if (!get().instances[id]) {
+      const instance = await api.plugins.instance(id);
+      applyInstance(set, instance);
     }
 
     const socket = createPluginSocket(id);
-
-    set((s) => {
-      const entry = s.plugins[id];
-      if (!entry) return s;
-      return {
-        plugins: { ...s.plugins, [id]: { ...entry, socket, logs: [] } },
-      };
-    });
+    set((s) => ({
+      sockets: { ...s.sockets, [id]: socket },
+      logsByInstance: { ...s.logsByInstance, [id]: [] },
+    }));
 
     socket.onmessage = (e) => {
       const frame = JSON.parse(e.data) as PluginWsFrame;
       set((s) => {
-        const entry = s.plugins[id];
-        if (!entry) return s;
-        if (frame.type === "plugin_state") {
+        const instance = s.instances[id];
+        if (!instance && frame.type !== "plugin_instance_state") return s;
+
+        if (frame.type === "plugin_instance_state") {
           return {
-            plugins: { ...s.plugins, [id]: { ...entry, plugin: frame.data } },
+            instances: { ...s.instances, [id]: frame.data },
           };
         }
         if (frame.type === "log") {
+          const current = s.logsByInstance[id] ?? [];
           return {
-            plugins: {
-              ...s.plugins,
-              [id]: { ...entry, logs: [...entry.logs, frame.data] },
+            logsByInstance: {
+              ...s.logsByInstance,
+              [id]: [...current, frame.data].slice(-2000),
             },
           };
         }
         if (frame.type === "status") {
-          const updated: Plugin = {
-            ...entry.plugin,
-            status: frame.data.status,
-            last_error: frame.data.error ?? entry.plugin.last_error,
-          };
+          const current = s.instances[id];
+          if (!current) return s;
           return {
-            plugins: { ...s.plugins, [id]: { ...entry, plugin: updated } },
+            instances: {
+              ...s.instances,
+              [id]: {
+                ...current,
+                status: frame.data.status,
+                current_run_id: frame.data.run_id ?? current.current_run_id,
+              },
+            },
           };
         }
         if (frame.type === "logs_cleared") {
           return {
-            plugins: { ...s.plugins, [id]: { ...entry, logs: [] } },
+            logsByInstance: { ...s.logsByInstance, [id]: [] },
           };
         }
         return s;
@@ -161,35 +193,23 @@ export const usePluginStore = create<Store>((set, get) => ({
 
     socket.onclose = () => {
       set((s) => {
-        const entry = s.plugins[id];
-        if (!entry || entry.socket !== socket) return s;
-        return {
-          plugins: { ...s.plugins, [id]: { ...entry, socket: null } },
-        };
+        if (s.sockets[id] !== socket) return s;
+        return { sockets: { ...s.sockets, [id]: null } };
       });
     };
   },
 
   unsubscribe: (id) => {
-    const entry = get().plugins[id];
-    if (entry?.socket) {
-      entry.socket.close();
-    }
+    const socket = get().sockets[id];
+    if (socket) socket.close();
   },
 }));
 
-function applyPlugin(
-  set: (fn: (s: { plugins: Record<string, PluginEntry> }) => Partial<{
-    plugins: Record<string, PluginEntry>;
-  }>) => void,
-  id: string,
-  p: Plugin,
+function applyInstance(
+  set: (fn: (s: Store) => Partial<Store>) => void,
+  instance: PluginInstance,
 ) {
-  set((s) => {
-    const entry = s.plugins[id];
-    if (!entry) return s;
-    return {
-      plugins: { ...s.plugins, [id]: { ...entry, plugin: p } },
-    };
-  });
+  set((s) => ({
+    instances: { ...s.instances, [instance.id]: instance },
+  }));
 }
