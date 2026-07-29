@@ -159,6 +159,11 @@ export default function SessionDashboard() {
 
   const rows = buildForest(entries);
 
+  const openSession = (sessionId: string) => {
+    setActive(sessionId);
+    navigate(`/console/${sessionId}`);
+  };
+
   return (
     <div className="p-6 flex flex-col min-h-0 flex-1">
       <h1 className="text-2xl font-semibold text-white mb-6 shrink-0">Sessions</h1>
@@ -182,7 +187,12 @@ export default function SessionDashboard() {
               return (
               <tr
                 key={session.id}
-                className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors"
+                onDoubleClick={(e) => {
+                  if (editingId === session.id) return;
+                  if ((e.target as HTMLElement).closest("button, input")) return;
+                  openSession(session.id);
+                }}
+                className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors cursor-pointer"
               >
                 <td className="py-3 pr-4">
                   <span className="inline-flex items-center gap-1.5">
@@ -271,10 +281,7 @@ export default function SessionDashboard() {
                 </td>
                 <td className="py-3 flex gap-2">
                   <button
-                    onClick={() => {
-                      setActive(session.id);
-                      navigate(`/console/${session.id}`);
-                    }}
+                    onClick={() => openSession(session.id)}
                     className="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white text-xs transition-colors"
                   >
                     Open
