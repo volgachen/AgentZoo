@@ -128,7 +128,11 @@ class SessionRunner:
             yield ev
 
     def _broadcast(self, event: StreamEvent) -> None:
-        if event.type in (StreamEventType.ASSISTANT_MESSAGE, StreamEventType.TOOL_MESSAGE):
+        # TOOL_MESSAGE is an internal persistence event for OpenAI-native tool
+        # result messages. ASSISTANT_MESSAGE is now also sent to UI subscribers so
+        # the frontend receives content and tool_calls as one assistant payload,
+        # matching restored websocket history after a backend restart.
+        if event.type == StreamEventType.TOOL_MESSAGE:
             return
         for q in list(self._subscribers):
             try:
@@ -180,7 +184,7 @@ class SessionRunner:
         try:
             await self._adapter.send(delivered)
             async for event in self._adapter.stream():
-                self._broadcast(event)
+                should_broadcast = True
                 # Reflect a pending confirm in the session status so the
                 # dashboard shows "waiting for approval"; flip back to RUNNING
                 # once the gate clears (the tool result or next event arrives).
@@ -212,9 +216,14 @@ class SessionRunner:
                         self._session_id, MessageRole.TOOL, event.data
                     )
                 elif event.type == StreamEventType.TEXT:
-                    agent_buf.append(event.data)
+                    if saw_native_messages:
+                        should_broadcast = False
+                    else:
+                        agent_buf.append(event.data)
                 elif event.type == StreamEventType.TOOL_CALL:
-                    if not saw_native_messages:
+                    if saw_native_messages:
+                        should_broadcast = False
+                    else:
                         await self._db.add_message(
                             self._session_id, MessageRole.TOOL_CALL, event.data
                         )
@@ -225,6 +234,8 @@ class SessionRunner:
                         )
                 elif event.type == StreamEventType.ERROR:
                     errored = True
+                if should_broadcast:
+                    self._broadcast(event)
         finally:
             self._generating = False
 

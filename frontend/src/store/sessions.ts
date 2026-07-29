@@ -43,6 +43,7 @@ function messageToEvent(m: Message): StreamEvent {
     case "system":
       return { type: "status", data: m.content };
     case "agent":
+      return { type: "assistant_message", data: m.content };
     default:
       return { type: "text", data: m.content };
   }

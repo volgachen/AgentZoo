@@ -4,8 +4,8 @@ Requires uvicorn running AND OPENAI_API_KEY (and optionally OPENAI_BASE_URL /
 OPENAI_MODEL) in the backend `.env`.
 
 Uses the Research Agent seed and prompts it for a topic that should trigger
-arxiv_search / web_search. Asserts we see at least one TOOL_CALL followed by
-a final TEXT event before DONE.
+arxiv_search / web_search. Asserts we see at least one assistant_message with
+embedded tool_calls followed by a final assistant_message with content before DONE.
 """
 import asyncio
 import json
@@ -32,13 +32,18 @@ async def drain_turn(ws) -> tuple[list[str], list[str], str]:
         if et == "session_state":
             info(f"session_state -> status={evt['data'].get('status')}")
             continue
-        if et == "text":
-            texts.append(evt["data"])
-            info(f"text: {evt['data'][:100]}")
-            continue
-        if et == "tool_call":
-            tool_calls.append(evt["data"])
-            info(f"tool_call: {evt['data'][:120]}")
+        if et == "assistant_message":
+            assistant = json.loads(evt["data"])
+            content = assistant.get("content")
+            if content:
+                texts.append(content)
+                info(f"assistant content: {content[:100]}")
+            for tool_call in assistant.get("tool_calls") or []:
+                fn = tool_call.get("function", {})
+                name = fn.get("name", "unknown")
+                args = fn.get("arguments", "{}")
+                tool_calls.append(json.dumps({"name": name, "args": args}))
+                info(f"assistant tool_call: {name}({args[:80]})")
             continue
         if et in ("done", "error"):
             terminal = et

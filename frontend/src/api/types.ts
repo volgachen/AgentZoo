@@ -12,6 +12,7 @@ export type MessageRole = "system" | "user" | "agent" | "tool_call" | "tool";
 
 export type StreamEventType =
   | "text"
+  | "assistant_message"
   | "tool_call"
   | "tool_confirm"
   | "tool_result"

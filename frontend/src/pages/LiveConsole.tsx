@@ -15,9 +15,45 @@ const EVENT_STYLE: Record<string, string> = {
   error: "text-red-400",
   done: "text-green-500",
   session_state: "text-gray-500",
-  agent_message: "text-gray-200",
+  assistant_message: "text-gray-200",
   user: "text-indigo-300",
 };
+
+interface AssistantToolCall {
+  id?: string;
+  type?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
+interface AssistantPayload {
+  role?: string;
+  content?: string | null;
+  tool_calls?: AssistantToolCall[] | null;
+}
+
+function parseAssistantData(raw: string): AssistantPayload {
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object" && obj.role === "assistant") {
+      return obj as AssistantPayload;
+    }
+  } catch {
+    // Legacy rows stored plain assistant text.
+  }
+  return { role: "assistant", content: raw, tool_calls: null };
+}
+
+function parseToolArguments(raw: string | undefined): unknown {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
 
 // Build a one-line summary + a fully-formatted block for tool events. The raw
 // payload is JSON: tool_call = {name,args}, tool_result = {name,result}.
@@ -91,7 +127,30 @@ function ToolEventLine({ event }: { event: StreamEvent }) {
   );
 }
 
+function AssistantMessageLine({ event }: { event: StreamEvent }) {
+  const payload = parseAssistantData(event.data);
+  const content = payload.content ?? "";
+  const toolCalls = payload.tool_calls ?? [];
+  return (
+    <div className="text-left font-mono text-sm text-gray-200 whitespace-pre-wrap break-all">
+      {content && <div>{content}</div>}
+      {toolCalls.map((toolCall, index) => {
+        const name = toolCall.function?.name ?? "unknown";
+        const args = parseToolArguments(toolCall.function?.arguments);
+        const toolEvent: StreamEvent = {
+          type: "tool_call",
+          data: JSON.stringify({ name, args }),
+        };
+        return <ToolEventLine key={toolCall.id ?? index} event={toolEvent} />;
+      })}
+    </div>
+  );
+}
+
 function EventLine({ event }: { event: StreamEvent }) {
+  if (event.type === "assistant_message") {
+    return <AssistantMessageLine event={event} />;
+  }
   if (
     event.type === "tool_call" ||
     event.type === "tool_confirm" ||
