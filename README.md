@@ -1,94 +1,56 @@
-# AgentZoo
+# 新时代 AI 工作台
 
-A gateway for managing and orchestrating multiple AI agents, with a real-time web dashboard.
+在这个时代，每个人都有很多事情要处理：完成本职工作、追踪前沿热点，还要记得回复越来越多的通讯消息。
 
-## Architecture
+但我们不可能都像大老板一样，有秘书或助理帮自己处理琐事。所以，如果有 AI 助理，是不是可以让生活和工作更轻松一些？
 
-```
-frontend/   React 19 + Vite + TypeScript + Tailwind CSS
-backend/    FastAPI + asyncio
-```
+这个项目希望提供一个可以长期运行在你自己电脑上的 AI 工作台。你可以把事情交给 AI 助理，让它帮你记录、提醒、调研，或者在授权后操作浏览器完成一些重复性任务。
 
-The backend exposes a REST + WebSocket API. Each session maps to a `SessionRunner` that owns one agent adapter instance and fans its event stream out to every dashboard subscriber. The `ClaudeCodeAdapter` drives the `claude` CLI as a subprocess per turn, using `--session-id` / `--resume` for conversation continuity; the `OpenAIToolUseAdapter` runs an in-process tool-calling loop with optional human-in-the-loop confirmation before each tool call.
+## 特性
 
-## Getting Started
+- **日程安排助理**：将需要做的事情转发给 AI 助理，AI 助理可以帮你记录在日历上，并在合适的时间提醒你处理。
+- **网页每日签到**：对于需要每日签到、打卡，或其他重复性操作的网页，可以让 AI 助理在浏览器中协助处理。
+- **消息自动调研**：当群友、同事或老板聊到你不了解的内容时，可以让 AI 助理帮你搜索和整理资料，节省查找信息的时间。
 
-**Backend**
+## 使用方法
+
+首先，你需要给 AI 助理准备一台电脑。AI 助理会在这台电脑上运行后端服务、前端控制台，并在需要时操作浏览器。
+
+### 1. 准备数据库服务
+
+AI 助理需要数据库来保存会话记录和状态信息。如果你已经有可用的 SQL 数据库服务，可以直接在 `backend/.env` 中配置连接信息。
+
+如果只是本地测试，也可以使用项目提供的简易数据库后端。
+
+### 2. 安装浏览器插件
+
+如果你希望 AI 助理操作浏览器，需要先在浏览器中安装 [控制插件](https://chromewebstore.google.com/detail/chatgpt/hehggadaopoacecdllhhajmbjkdcmajg) 。
+
+### 3. 启动后端服务
+
+启动前，请先在 `backend/.env` 中配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `OPENAI_MODEL` 等必要信息。
 
 ```bash
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 12598
 # API available at http://<your-ip>:12598
-# Docs at http://<your-ip>:12598/docs
+# Docs available at http://<your-ip>:12598/docs
 ```
 
-**Frontend**
+### 4. 启动前端服务
 
 ```bash
 cd frontend
 npm install
 npm run dev
-# Dashboard at http://<your-ip>:12599
+# Dashboard available at http://<your-ip>:12599
 ```
 
-## API
+### 5. 连接微信
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET / POST | `/api/v1/agents` | List / create agent templates |
-| GET / PUT / DELETE | `/api/v1/agents/{id}` | Get, update, or delete an agent template |
-| GET | `/api/v1/tools` | List registered tool names |
-| POST | `/api/v1/sessions` | Create and start a session |
-| GET | `/api/v1/sessions` | List sessions |
-| GET | `/api/v1/sessions/{id}` | Get session status |
-| GET | `/api/v1/sessions/{id}/messages` | Get message history |
-| POST | `/api/v1/sessions/{id}/messages` | Send a message into a session (cross-session) |
-| GET | `/api/v1/sessions/{id}/tasks` | Get the session's task list |
-| DELETE | `/api/v1/sessions/{id}` | Terminate a session |
-| WS | `/api/v1/sessions/{id}/stream` | Real-time event stream (duplex) |
-| CRUD | `/api/v1/plugins` + `/{id}/start\|stop\|restart\|logs` | Manage supervised plugin subprocesses |
-| GET | `/api/v1/fs/browse` · `/fs/templates` · `/fs/home` | Read-only filesystem browsing for pickers |
+敬请期待。
 
-WebSocket events are JSON with `type` and `data` fields. Types: `text`, `tool_call`, `tool_confirm`, `tool_result`, `status`, `error`, `done`, `user`, `session_state`. Inbound from the client is either `{ content }` (a user turn) or `{ decision, call_id }` (approve/deny a `tool_confirm`).
+## 致谢
 
-## Project Structure
-
-```
-backend/app/
-├── main.py              # FastAPI app entry point + lifespan (DB pool)
-├── config.py            # Settings from env / .env
-├── models/domain.py     # AgentTemplate, Session, Message, Task, Plugin, enums
-├── core/runner.py       # SessionRunner — owns an adapter, fans out events
-├── db/
-│   ├── interface.py     # IAgentDatabase abstract interface
-│   ├── mysql.py         # MySQL implementation (default)
-│   ├── mock.py          # In-memory implementation (fallback/dev)
-│   └── deps.py          # FastAPI dependency injection
-├── adapters/
-│   ├── base.py          # BaseAgentAdapter interface + StreamEvent types
-│   ├── claude_code.py   # Claude Code CLI adapter (subprocess per turn)
-│   ├── openai_tool_use.py  # OpenAI tool-calling loop + confirm gate
-│   ├── registry.py      # session_id → SessionRunner registry
-│   └── tools/           # Decorator-registered tools (bash, read, write, edit,
-│                        #   web_search, web_fetch, subagent, session_send, task_*)
-├── plugins/             # Supervised plugin subprocess runner + log buffer
-└── routers/
-    ├── agents.py  sessions.py  tools.py  tasks.py  fs.py  plugins.py
-
-frontend/src/
-├── api/                 # Typed fetch + WebSocket client + wire types
-├── store/               # Zustand stores (sessions.ts, plugins.ts)
-├── components/          # AgentDetailModal, WorkingDirPicker, TaskListPanel, SubAgentListPanel
-└── pages/
-    ├── AgentRegistry.tsx  SessionDashboard.tsx  LiveConsole.tsx
-    └── PluginRegistry.tsx  PluginConsole.tsx
-```
-
-## Roadmap
-
-- [x] Milestone 1 — Backend skeleton (FastAPI, mock DB, REST + WebSocket)
-- [x] Milestone 2 — Claude Code adapter (subprocess, stream-json, session resume)
-- [x] Milestone 3 — Frontend dashboard (Agent Registry, Session Dashboard, Live Console)
-- [x] Tool-use adapter + tools, task system, plugins, MySQL persistence, human-in-the-loop tool confirm
-- [ ] Milestone 4 — Research workflow + PostgreSQL
+此项目的许多设计理念借鉴了 Codex、Claude Code 等业内知名产品，同时也感谢 [wechatbot](https://github.com/corespeed-io/wechatbot) 等项目提供的能力支持。

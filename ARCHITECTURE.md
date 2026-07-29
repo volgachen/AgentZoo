@@ -1,129 +1,185 @@
-# 🤖 Agent Gateway & Multi-Agent Orchestration System 开发白皮书
+# Agent Gateway & Multi-Agent Orchestration System 开发白皮书
 
-## 一、 项目愿景与目标
+## 一、项目愿景与目标
 
-构建一个高扩展性的 **Agent Gateway (智能体网关)**，实现对多种底层架构智能体（如基础 Tool-use Agent、CLI驱动的 Claude Code 等）的统一入口管理、会话持久化和流式状态监控。
+本项目旨在构建一个高扩展性的 **Agent Gateway（智能体网关）**，为多种底层智能体架构提供统一入口，包括基础 Tool-use Agent、CLI 驱动的 Claude Code Agent 等。
 
-**核心验证项目**：基于该网关搭建一套 **自动化 AI 研究与直播推流系统**。系统通过调度不同的 Agent 协同工作，完成从 Arxiv 检索、讲稿生成（Human-in-the-loop 审核）到自动推流的完整工作流。
+网关负责智能体模板管理、会话持久化、工具调用、人工确认、流式状态监控，以及前端控制台与底层 Agent Adapter 之间的通信协调。
 
 ---
 
-## 二、 系统总体架构图 (Layered Architecture)
+## 二、系统总体架构
 
-系统采用“网关-适配器”解耦模式，分为四大核心层级：
+系统采用“前端呈现层 - 网关接入层 - 后端逻辑层 - 数据库管理层”的解耦模式，核心层级如下：
 
 | 层级 | 模块名称 | 技术栈选型 | 核心职责 |
-|---|---|---|---|
-| **前端呈现层** | Management Dashboard | React 19, Vite, Tailwind CSS | 提供可视化控制台，包括智能体注册、活跃会话监控、实时日志流（WebSocket）。 |
-| **网关接入层** | API & WebSocket Gateway | FastAPI (Python), Uvicorn | 暴露 RESTful 接口与长连接，处理跨域 (CORS)，管理全局并发请求。 |
-| **核心逻辑层** | Session & Route Manager | 异步 Python, 依赖注入 (DI) | 负责状态机流转，依靠仓储模式 (Repository) 读写数据，调度底层 Adapter。 |
-| **代理适配层** | Agent Adapters | `asyncio.subprocess`, SDKs | 屏蔽底层差异。将标准指令转化为 API 请求或 CLI 标准输入，并捕获输出返回给网关。 |
+| --- | --- | --- | --- |
+| 前端呈现层 | Management Dashboard | React 19, Vite, Tailwind CSS | 提供可视化控制台，包括智能体注册、活跃会话监控、实时日志流和插件管理。 |
+| 网关接入层 | API & WebSocket Gateway | FastAPI, Uvicorn | 暴露 RESTful API 与 WebSocket 长连接，处理跨域请求，承接前端与后端逻辑层之间的交互。 |
+| 后端逻辑层 | Session Manager & Adapter Runtime | 异步 Python, 依赖注入 | 负责会话状态流转、任务列表管理、工具调用确认、底层 Agent Adapter 调度，以及插件子进程管理。 |
+| 数据库管理层 | Agent Database | MySQL, In-memory Mock | 通过统一数据库接口保存智能体模板、会话、消息、任务和插件状态。 |
 
----
+### 项目文件结构总览
 
-## 三、 数据库服务设计 (基于仓储模式的依赖倒置)
+```text
+backend/app/
+├── main.py                 # FastAPI app entry point + lifespan (DB pool)
+├── config.py               # Settings from env / .env
+├── models/domain.py        # AgentTemplate, Session, Message, Task, Plugin, enums
+├── core/runner.py          # SessionRunner — owns an adapter, fans out events
+├── db/
+│   ├── interface.py        # IAgentDatabase abstract interface
+│   ├── mysql.py            # MySQL implementation (default)
+│   ├── mock.py             # In-memory implementation (fallback/dev)
+│   └── deps.py             # FastAPI dependency injection
+├── adapters/
+│   ├── base.py             # BaseAgentAdapter interface + StreamEvent types
+│   ├── claude_code.py      # Claude Code CLI adapter (subprocess per turn)
+│   ├── openai_tool_use.py  # OpenAI tool-calling loop + confirm gate
+│   ├── registry.py         # session_id → SessionRunner registry
+│   └── tools/              # Decorator-registered tools
+├── plugins/                # Supervised plugin subprocess runner + log buffer
+└── routers/
+    ├── agents.py
+    ├── sessions.py
+    ├── tools.py
+    ├── tasks.py
+    ├── fs.py
+    └── plugins.py
 
-为保证前期研发的高效性与后期生产环境的健壮性，数据库层采用 **接口与实现分离** 的设计。
-
-### 1. 核心领域模型 (Domain Models)
-
-*   **AgentTemplate (智能体模板)**: 定义 Agent 的类型、Prompt 和包含的工具。
-*   **Session (会话状态)**: 管理多轮对话，记录状态枚举 (`INITIALIZING`, `RUNNING`, `WAITING_USER`, `WAITING_CONFIRM`, `COMPLETED`, `ERROR`)。
-*   **Message (交互日志)**: 记录系统、用户、工具与 Agent 之间的每一次信息流转。
-
-### 2. 数据库接口定义 (`IAgentDatabase`)
-
-所有的业务逻辑均仅依赖以下抽象接口：
-
-```python
-from abc import ABC, abstractmethod
-
-class IAgentDatabase(ABC):
-    @abstractmethod
-    async def get_agent(self, agent_id: str) -> AgentTemplate: pass
-    
-    @abstractmethod
-    async def create_session(self, agent_id: str) -> Session: pass
-    
-    @abstractmethod
-    async def update_session_status(self, session_id: str, status: str) -> Session: pass
-    
-    @abstractmethod
-    async def add_message(self, session_id: str, role: str, content: str) -> Message: pass
+frontend/src/
+├── api/                    # Typed fetch + WebSocket client + wire types
+├── store/                  # Zustand stores
+├── components/             # AgentDetailModal, WorkingDirPicker, TaskListPanel, SubAgentListPanel
+└── pages/                  # AgentRegistry, SessionDashboard, LiveConsole, PluginRegistry, PluginConsole
 ```
 
-### 3. 分阶段实现策略
+---
 
-*   **阶段一 (研发期)**：注入 `MockMemoryDatabase`。数据存储在 Python 字典中，极速启动，无需配置外部环境，方便跑通前后端通信与 Agent 适配逻辑。仍作为无 MySQL 时的回退实现保留。
-*   **阶段二 (当前)**：注入 `MySqlDatabase`（`DB_TYPE=mysql`，默认）。基于 `aiomysql` 实现接口，启动时幂等地建表与播种，业务层代码 **零修改**。
-*   **阶段三 (生产目标)**：注入 `PostgreSQLDatabase`（Milestone 4）。基于 `SQLAlchemy` (asyncpg) 重新实现同一接口，同样对业务层零侵入。
+## 三、数据库服务设计
+
+为了兼顾前期研发效率与后期生产环境的稳定性，数据库层采用 **接口与实现分离** 的设计。业务逻辑依赖 `IAgentDatabase` 抽象接口，具体实现可以是 MySQL，也可以是用于开发和测试的内存 Mock 后端。
+
+### 1. 核心领域模型
+
+- **AgentTemplate（智能体模板）**：定义 Agent 的名称、类型、系统提示词、可用工具、模型配置和附加配置。
+- **Session（会话状态）**：管理多轮对话，记录会话所属智能体、工作目录、父会话、附加提示词和状态枚举。
+- **Message（交互日志）**：记录系统、用户、工具与 Agent 之间的信息流转。
+- **Task（任务项）**：记录单个会话内的任务列表、任务状态、依赖关系、负责人和元数据。
+- **Plugin（插件）**：记录插件代码、运行状态、退出码和错误信息。
+
+常见会话状态包括：`INITIALIZING`、`RUNNING`、`WAITING_USER`、`WAITING_CONFIRM`、`COMPLETED`、`ERROR`。
+
+### 2. 数据库接口定义
+
+`IAgentDatabase` 统一封装 Agent、Session、Message、Plugin 和 Task 的读写能力。业务层只依赖接口，不直接绑定具体数据库实现。
+
+核心接口包括：
+
+```python
+class IAgentDatabase(ABC):
+    async def list_agents(self) -> list[AgentTemplate]: ...
+    async def get_agent(self, agent_id: str) -> AgentTemplate: ...
+    async def create_agent(self, template: AgentTemplate) -> AgentTemplate: ...
+    async def update_agent(self, agent_id: str, **kwargs) -> AgentTemplate: ...
+    async def delete_agent(self, agent_id: str) -> None: ...
+
+    async def create_session(self, agent_id: str, working_dir: str | None = None, **kwargs) -> Session: ...
+    async def get_session(self, session_id: str) -> Session: ...
+    async def update_session_title(self, session_id: str, title: str) -> Session: ...
+    async def list_sessions(self) -> list[Session]: ...
+    async def update_session_status(self, session_id: str, status: SessionStatus) -> Session: ...
+
+    async def add_message(self, session_id: str, role: MessageRole, content: str, **kwargs) -> Message: ...
+    async def get_messages(self, session_id: str) -> list[Message]: ...
+
+    async def list_plugins(self) -> list[Plugin]: ...
+    async def get_plugin(self, plugin_id: str) -> Plugin: ...
+    async def create_plugin(self, name: str, code: str) -> Plugin: ...
+    async def update_plugin(self, plugin_id: str, **kwargs) -> Plugin: ...
+    async def delete_plugin(self, plugin_id: str) -> None: ...
+    async def set_plugin_status(self, plugin_id: str, status: PluginStatus, **kwargs) -> Plugin: ...
+
+    async def create_task(self, task_list_id: str, subject: str, description: str, **kwargs) -> Task: ...
+    async def get_task(self, task_list_id: str, task_id: str) -> Task | None: ...
+    async def list_tasks(self, task_list_id: str) -> list[Task]: ...
+    async def update_task(self, task_list_id: str, task_id: str, **kwargs) -> Task | None: ...
+    async def delete_task(self, task_list_id: str, task_id: str) -> bool: ...
+```
 
 ---
 
-## 四、 后端网关服务规范 (Backend Specification)
+## 四、后端网关服务规范
 
-后端主要充当“调度中心”与“数据总线”。
+后端主要充当“调度中心”和“数据总线”。FastAPI 应用在启动时初始化数据库连接，并挂载 Agent、Session、Tool、Task、Filesystem 和 Plugin 相关路由。
 
-### 1. 核心 API 路由设计
+### 1. 核心 API 路由
 
-| 路由端点 | HTTP 方法 | 功能描述 |
-|---|---|---|
-| `/api/v1/agents` | GET | 获取大厅中可用的 Agent 模板列表。 |
-| `/api/v1/sessions` | POST | 启动新会话，拉起底层的 Agent 适配器。 |
-| `/api/v1/sessions/{id}` | GET | 获取指定会话的当前状态机状态。 |
-| `/api/v1/sessions/{id}/stream`| WebSocket | **核心**：实时推送 Agent 的思考过程、工具调用日志及终端输出 (stdout) 给前端。 |
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET / POST | `/api/v1/agents` | List / create agent templates |
+| GET / PUT / DELETE | `/api/v1/agents/{agent_id}` | Get, update, or delete an agent template |
+| GET | `/api/v1/tools` | List registered tool names |
+| POST | `/api/v1/sessions` | Create and start a session |
+| GET | `/api/v1/sessions` | List sessions |
+| GET | `/api/v1/sessions/{session_id}` | Get session status |
+| PATCH | `/api/v1/sessions/{session_id}` | Rename a session |
+| GET | `/api/v1/sessions/{session_id}/messages` | Get message history |
+| POST | `/api/v1/sessions/{session_id}/messages` | Send a message into a session |
+| GET | `/api/v1/sessions/{session_id}/tasks` | Get the session's task list |
+| DELETE | `/api/v1/sessions/{session_id}` | Terminate a session |
+| WS | `/api/v1/sessions/{session_id}/stream` | Real-time session event stream |
+| GET / POST | `/api/v1/plugins` | List / create plugins |
+| GET / PUT / DELETE | `/api/v1/plugins/{plugin_id}` | Get, update, or delete a plugin |
+| POST | `/api/v1/plugins/{plugin_id}/start` | Start a plugin subprocess |
+| POST | `/api/v1/plugins/{plugin_id}/stop` | Stop a plugin subprocess |
+| POST | `/api/v1/plugins/{plugin_id}/restart` | Restart a plugin subprocess |
+| GET | `/api/v1/plugins/{plugin_id}/logs` | Read buffered plugin logs |
+| POST | `/api/v1/plugins/{plugin_id}/logs/clear` | Clear buffered plugin logs |
+| WS | `/api/v1/plugins/{plugin_id}/stream` | Stream plugin status and logs |
+| GET | `/api/v1/fs/browse` | Browse directories for pickers |
+| GET | `/api/v1/fs/templates` | Browse template directories |
+| GET | `/api/v1/fs/home` | Get home, project root and templates root |
 
-### 2. Agent 适配器模式 (Adapter Pattern)
+### 2. WebSocket 事件
 
-针对不同类型的 Agent，必须实现 `BaseAgentAdapter` 接口。
+Session WebSocket 使用 JSON 消息通信。服务端事件通常包含 `type` 和 `data` 字段，常见类型包括：`text`、`tool_call`、`tool_confirm`、`tool_result`、`status`、`error`、`done`、`user`、`session_state`。
 
-*   **基础 Tool-use Agent**: 通过标准 LLM SDK 循环调用，解析 `tool_calls`；非白名单工具在执行前经 `TOOL_CONFIRM` 事件阻塞等待人工批准（Human-in-the-loop）。
-*   **Claude Code Adapter (重点难点)**:
-    *   `claude` CLI 是单轮的（读一条 stdin 即退出），因此**每轮 `stream()` 都新起一个子进程**，而非维持长驻进程 —— 早期用 `asyncio.Queue` + 持久 stdin 的方案因 CLI 遇 EOF 即退出而失败。
-    *   会话连续性交由 CLI 自身：首轮 `--session-id`，后续 `--resume <session_id>`。
-    *   以 `--output-format stream-json --verbose` 启动，实时解析 NDJSON（`system/init`、`assistant`、`result`）为 `StreamEvent` 经 WebSocket 下发。
+客户端发送到 Session WebSocket 的消息分为两类：
+
+```json
+{ "content": "user message" }
+```
+
+或用于确认工具调用：
+
+```json
+{ "decision": "approve", "call_id": "...", "message": "optional supplementary message" }
+```
+
+### 3. Agent 适配器模式
+
+不同类型的 Agent 通过 `BaseAgentAdapter` 接入系统，并由 `SessionRunner` 统一调度。
+
+- **Tool-use Agent**：通过 OpenAI 兼容接口进行工具调用循环，解析模型返回的 `tool_calls`，并在执行需要确认的工具前通过 `tool_confirm` 事件等待人工批准。
+- **Claude Code Agent**：通过 CLI 子进程方式接入，按会话工作目录运行，并将输出转化为统一的流式事件。
 
 ---
 
-## 五、 前端控制台规范 (Frontend Specification)
+## 五、前端控制台规范
 
-前端提供“驾驶舱”级别的管理体验。
+前端提供“驾驶舱”式的管理体验，面向 Agent 模板、会话、实时控制台和插件管理。
 
 ### 1. 页面模块规划
 
-*   **🤖 智能体大厅 (Agent Registry)**: 卡片式展示系统支持的 Agent。提供快捷表单配置初始 Prompt，一键触发 `Launch`。
-*   **⚡ 会话看板 (Session Dashboard)**: 动态数据表格。利用轮询或全局 WebSocket 同步所有在线 Session 的运行状态（如“检索中”、“等待人工确认”）。
-*   **📺 实时控制台 (Live Console)**: 
-    *   左侧区域：类似 `xterm.js` 的终端界面或气泡聊天框，实时打印执行日志。
-    *   右侧区域：人工干预面板 (Human-in-the-loop)。当状态为 `WAITING_USER` 时，可在此修改生成的讲稿并点击 `Approve` 放行。
+- **智能体大厅（Agent Registry）**：卡片式展示系统支持的 Agent，支持配置初始 Prompt、工具和模型信息，并一键启动会话。
+- **会话看板（Session Dashboard）**：展示活跃会话及其运行状态，便于进入具体会话控制台。
+- **实时控制台（Live Console）**：展示会话流式输出、工具调用、工具确认、任务列表和用户输入区。
+- **插件管理（Plugin Registry / Plugin Console）**：管理插件代码、插件运行状态和插件日志。
 
 ### 2. 关键技术点
 
-*   必须配置 Axios/Fetch 的 `baseURL` 并在 FastAPI 端开启 `CORSMiddleware`，防止跨域拦截。
-*   WebSocket 断线重连机制 (Reconnect logic)，确保长耗时任务不断联。
-
----
-
-## 六、 验证项目工作流：自动化研究与直播推流
-
-本流程将贯穿上述所有模块，验证系统的多 Agent 编排能力：
-
-1.  **触发 (Trigger)**: 用户在 Dashboard 启动 `Research_Agent` 会话，输入检索主题（如“具身智能”）。
-2.  **检索与生成 (Processing)**: 网关调度基础 Tool Agent，调用 Arxiv/Web 搜索工具，将数据写入 Database，汇总后交由 `Claude Code` 生成直播脚本。
-3.  **人工审核 (Human-in-the-loop)**: 网关将 Session 状态置为 `WAITING_USER`。用户在前端 Live Console 预览并修改脚本。
-4.  **自动推流 (Broadcasting)**: 用户点击确认，网关拉起 `Broadcaster_Agent`，接管最终脚本，调用 TTS 及 FFMPEG/OBS 接口完成流媒体推送。
-
----
-
-## 七、 实施里程碑 (Roadmap)
-
-*   **📍 Milestone 1: 骨架搭建 (Mock DB + 基础 API)**
-    *   完成 FastAPI 基础路由与依赖注入的 Mock 数据库。
-    *   跑通一个基础的 HTTP 和 WebSocket 接口。
-*   **📍 Milestone 2: 攻坚 Claude Code 适配器**
-    *   实现通过 `asyncio.subprocess` 后台安全运行 Claude Code，并将 CLI 输出成功转为 WebSocket 流推送给客户端。
-*   **📍 Milestone 3: 前端 Dashboard 连通**
-    *   基于 React 19 搭建控制台，实现状态展示和日志渲染。
-*   **📍 Milestone 4: 工作流组装与生产化迁移**
-    *   串联 Research -> Script -> Broadcast 工作流。
-    *   持久化已从 Mock 迁至 MySQL（当前默认）；PostgreSQL 为后续生产目标。
+- 使用 WebSocket 长连接接收会话流式事件和插件日志。
+- 使用 Zustand 管理前端会话、插件等状态。
+- 通过类型化 API 客户端与后端 RESTful API 通信。
+- 通过文件系统浏览接口选择工作目录和模板目录。
