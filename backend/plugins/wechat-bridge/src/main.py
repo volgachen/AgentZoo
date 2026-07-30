@@ -93,6 +93,20 @@ class AgentZooHost:
         print(json.dumps(action, ensure_ascii=False), flush=True)
 
 
+def plain_text_content(content: Any) -> str:
+    if isinstance(content, str):
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            return content
+        if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
+            return parsed["content"]
+        return content
+    if isinstance(content, dict) and isinstance(content.get("content"), str):
+        return content["content"]
+    return str(content)
+
+
 class WeChatBridgePlugin:
     def __init__(self, config: PluginConfig) -> None:
         self.config = config
@@ -221,6 +235,7 @@ class WeChatBridgePlugin:
         if not session_id or not content:
             print("ignored message.created without session_id/content", flush=True)
             return
+        text = plain_text_content(content)
 
         target_user_ids = self.config.wechat_users_for_session(session_id)
         if not target_user_ids and self._last_wechat_user_id:
@@ -236,7 +251,7 @@ class WeChatBridgePlugin:
 
         for wechat_user_id in target_user_ids:
             print(f"forwarding agent reply to wechat user={wechat_user_id}", flush=True)
-            await self.bot.send(wechat_user_id, content)
+            await self.bot.send(wechat_user_id, text)
 
 
 async def async_main() -> None:
