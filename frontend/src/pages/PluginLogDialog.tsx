@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { usePluginStore } from "../store/plugins";
 import type { PluginInstance, PluginLogLine, PluginRun } from "../api/types";
 
+const EMPTY_LOGS: PluginLogLine[] = [];
+
 const LINE_STYLE: Record<PluginLogLine["stream"], string> = {
   stdout: "text-gray-200",
   stderr: "text-red-300",
@@ -16,7 +18,7 @@ interface Props {
 }
 
 export default function PluginLogDialog({ instance, run, mode, onClose }: Props) {
-  const liveLogs = usePluginStore((s) => s.logsByInstance[instance.id] ?? []);
+  const liveLogs = usePluginStore((s) => s.logsByInstance[instance.id] ?? EMPTY_LOGS);
   const subscribe = usePluginStore((s) => s.subscribe);
   const unsubscribe = usePluginStore((s) => s.unsubscribe);
   const loadInstanceLogs = usePluginStore((s) => s.loadInstanceLogs);
@@ -27,6 +29,8 @@ export default function PluginLogDialog({ instance, run, mode, onClose }: Props)
   const [err, setErr] = useState<string | null>(null);
   const [autoscroll, setAutoscroll] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const runId = run?.id ?? null;
 
   useEffect(() => {
     setErr(null);
@@ -39,13 +43,13 @@ export default function PluginLogDialog({ instance, run, mode, onClose }: Props)
       return () => unsubscribe(instance.id);
     }
 
-    if (!run) return;
+    if (!runId) return;
     setLoading(true);
-    loadRunLogs(run.id, 1000)
+    loadRunLogs(runId, 1000)
       .then(setHistoryLogs)
       .catch((e) => setErr((e as Error).message))
       .finally(() => setLoading(false));
-  }, [instance.id, loadInstanceLogs, loadRunLogs, mode, run, subscribe, unsubscribe]);
+  }, [instance.id, loadInstanceLogs, loadRunLogs, mode, runId, subscribe, unsubscribe]);
 
   const logs = mode === "live" ? liveLogs : historyLogs;
 
