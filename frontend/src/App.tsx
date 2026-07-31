@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useStore } from "./store/sessions";
 import { usePluginStore } from "./store/plugins";
 import ActiveSessionsMenu from "./components/ActiveSessionsMenu";
+import ToastCenter from "./components/ToastCenter";
 
 const NAV = [
   { to: "/", label: "Agent Registry", end: true },
@@ -68,6 +69,7 @@ export default function App() {
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <Outlet />
       </main>
+      <ToastCenter />
     </div>
   );
 }

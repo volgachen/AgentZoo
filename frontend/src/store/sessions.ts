@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Message, Session, SessionStatus, StreamEvent, Task } from "../api/types";
 import { api, createSessionSocket } from "../api/client";
+import { useToastStore } from "./toasts";
 
 interface PendingConfirm {
   call_id: string;
@@ -30,6 +31,46 @@ function shouldMarkAttentionUnread(
   return (
     previous !== next && (next === "WAITING_USER" || next === "WAITING_CONFIRM")
   );
+}
+
+function sessionDisplayName(session: Session): string {
+  return session.title?.trim() || `Session ${session.id.slice(0, 8)}…`;
+}
+
+function toastTitle(session: Session): string {
+  return `${sessionDisplayName(session)} · ${session.status}`;
+}
+
+function notifyWaitingUser(session: Session): void {
+  useToastStore.getState().upsertToast({
+    id: `${session.id}:WAITING_USER:${session.updated_at || session.last_message_at || Date.now()}`,
+    sessionId: session.id,
+    title: toastTitle(session),
+    message: "完成本轮回复，点击查看",
+    status: "WAITING_USER",
+  });
+}
+
+function notifyWaitingConfirm(
+  session: Session,
+  confirm: PendingConfirm,
+): void {
+  useToastStore.getState().upsertToast({
+    id: `${session.id}:confirm:${confirm.call_id}`,
+    sessionId: session.id,
+    title: toastTitle({ ...session, status: "WAITING_CONFIRM" }),
+    message: `请求调用 ${confirm.name} 工具，点击查看`,
+    status: "WAITING_CONFIRM",
+    confirm: {
+      callId: confirm.call_id,
+      toolName: confirm.name,
+      args: confirm.args,
+    },
+  });
+}
+
+function dismissSessionToasts(sessionId: string): void {
+  useToastStore.getState().dismissSessionToasts(sessionId);
 }
 
 function toolMessageToEventData(content: string): string {
@@ -110,6 +151,9 @@ export const useStore = create<Store>((set, get) => {
             nextSession.status,
           );
           const isCurrent = s.activeSessionId === sessionId;
+          if (!isCurrent && becameWaiting && nextSession.status === "WAITING_USER") {
+            notifyWaitingUser(nextSession);
+          }
           return {
             sessions: {
               ...s.sessions,
@@ -132,7 +176,7 @@ export const useStore = create<Store>((set, get) => {
               ? "WAITING_USER"
               : frame.type === "error"
                 ? "ERROR"
-                : isUser
+                : isUser || frame.type === "tool_result"
                   ? "RUNNING"
                   : null;
         const nextSession = inferredStatus
@@ -150,10 +194,11 @@ export const useStore = create<Store>((set, get) => {
         if (frame.type === "tool_confirm") {
           try {
             const obj = JSON.parse(frame.data);
-            pendingConfirms = [
-              ...pendingConfirms,
-              { call_id: obj.call_id, name: obj.name, args: obj.args },
-            ];
+            const confirm = { call_id: obj.call_id, name: obj.name, args: obj.args };
+            pendingConfirms = [...pendingConfirms, confirm];
+            if (!isCurrent && confirm.call_id) {
+              notifyWaitingConfirm(nextSession, confirm);
+            }
           } catch {
             // malformed — leave the queue as-is
           }
@@ -172,6 +217,10 @@ export const useStore = create<Store>((set, get) => {
           }
         } else if (isTerminal) {
           pendingConfirms = [];
+        }
+
+        if (!isCurrent && becameWaiting && nextSession.status === "WAITING_USER") {
+          notifyWaitingUser(nextSession);
         }
 
         return {
@@ -221,6 +270,7 @@ export const useStore = create<Store>((set, get) => {
     setActiveSession: (id) =>
       set((s) => {
         if (!id) return { activeSessionId: id };
+        dismissSessionToasts(id);
         const entry = s.sessions[id];
         if (!entry) return { activeSessionId: id };
         return {
@@ -243,28 +293,43 @@ export const useStore = create<Store>((set, get) => {
         const next = { ...s.sessions };
         for (const session of remote) {
           const existing = next[session.id];
-          next[session.id] = existing
-            ? {
-                ...existing,
-                session,
-                attentionUnread:
-                  s.activeSessionId === session.id
-                    ? false
-                    : existing.attentionUnread ||
-                      shouldMarkAttentionUnread(
-                        existing.session.status,
-                        session.status,
-                      ),
+          if (existing) {
+            const becameWaiting = shouldMarkAttentionUnread(
+              existing.session.status,
+              session.status,
+            );
+            const isCurrent = s.activeSessionId === session.id;
+            if (!isCurrent && becameWaiting) {
+              if (session.status === "WAITING_USER") {
+                notifyWaitingUser(session);
+              } else if (session.status === "WAITING_CONFIRM") {
+                useToastStore.getState().upsertToast({
+                  id: `${session.id}:WAITING_CONFIRM:${session.updated_at || Date.now()}`,
+                  sessionId: session.id,
+                  title: toastTitle(session),
+                  message: "请求工具调用确认，点击查看",
+                  status: "WAITING_CONFIRM",
+                });
               }
-            : {
-                session,
-                events: [],
-                socket: null,
-                generating: false,
-                tasks: [],
-                attentionUnread: false,
-                pendingConfirms: [],
-              };
+            }
+            next[session.id] = {
+              ...existing,
+              session,
+              attentionUnread: isCurrent
+                ? false
+                : existing.attentionUnread || becameWaiting,
+            };
+          } else {
+            next[session.id] = {
+              session,
+              events: [],
+              socket: null,
+              generating: false,
+              tasks: [],
+              attentionUnread: false,
+              pendingConfirms: [],
+            };
+          }
         }
         return { sessions: next };
       });
@@ -421,6 +486,7 @@ export const useStore = create<Store>((set, get) => {
     resolveConfirm: (sessionId, callId, approved, message) => {
       const entry = get().sessions[sessionId];
       if (!entry?.socket) return;
+      useToastStore.getState().dismissToast(`${sessionId}:confirm:${callId}`);
       entry.socket.send(
         JSON.stringify({
           decision: approved ? "approve" : "deny",
@@ -448,6 +514,7 @@ export const useStore = create<Store>((set, get) => {
     },
 
     closeSession: async (sessionId) => {
+      dismissSessionToasts(sessionId);
       const entry = get().sessions[sessionId];
       entry?.socket?.close();
       await api.sessions.delete(sessionId);
