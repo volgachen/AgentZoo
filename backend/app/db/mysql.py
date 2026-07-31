@@ -729,7 +729,7 @@ class MySqlDatabase(IAgentDatabase):
                 )
         await get_plugin_event_bus().publish(PluginEvent(
             type="message.created",
-            source=from_session_id or "agentzoo",
+            source=from_session_id or "augentia",
             data=message.model_dump(mode="json"),
         ))
         return message

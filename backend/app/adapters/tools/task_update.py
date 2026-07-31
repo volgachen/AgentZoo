@@ -6,7 +6,7 @@ from app.adapters.tools._task_scope import task_list_id
 from app.db.deps import get_db
 from app.models.domain import TaskStatus
 
-logger = logging.getLogger("agentzoo.tool.task_update")
+logger = logging.getLogger("augentia.tool.task_update")
 
 
 @register_tool

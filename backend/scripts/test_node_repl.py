@@ -15,7 +15,7 @@ Commands:
 Examples:
     > globalThis.x = 42; console.log("hi"); return x + 1;
     > .eval await new Promise(r => setTimeout(r, 100)); return "done";
-    > .add /home/user/projects/AgentZoo/codex_plugins/chrome/26.715.72359/scripts
+    > .add /home/user/projects/Augentia/codex_plugins/chrome/26.715.72359/scripts
     > .eval const m = await import("/path/to/plugin/scripts/browser-client.mjs"); return Object.keys(m);
     > .reset
 """

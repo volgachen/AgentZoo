@@ -6,7 +6,7 @@ from app.db.interface import IAgentDatabase
 from app.models.domain import MessageRole
 
 
-logger = logging.getLogger("agentzoo.plugin_actions")
+logger = logging.getLogger("augentia.plugin_actions")
 
 
 class PluginActionDispatcher:

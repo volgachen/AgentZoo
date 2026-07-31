@@ -1,7 +1,7 @@
-"""WeChat bridge runtime plugin for AgentZoo.
+"""WeChat bridge runtime plugin for Augentia.
 
 This plugin follows the local WeChatBot usage shown in
-E:/Projects/AgentZoo/wechat/example.py:
+E:/Projects/Augentia/wechat/example.py:
 
     bot = WeChatBot()
 
@@ -12,7 +12,7 @@ E:/Projects/AgentZoo/wechat/example.py:
     bot.run()
 
 Important: QR-code login is handled by WeChatBot() initialization, so this plugin
-does not request a separate AgentZoo startup interaction for login.
+does not request a separate Augentia startup interaction for login.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class PluginConfig:
 
     @classmethod
     def from_env(cls) -> "PluginConfig":
-        raw = os.getenv("AGENTZOO_PLUGIN_CONFIG", "{}")
+        raw = os.getenv("AUGENTIA_PLUGIN_CONFIG", "{}")
         data = json.loads(raw)
         return cls(
             command_prefix=data.get("command_prefix") or r"\cmd",
@@ -71,12 +71,12 @@ class PluginConfig:
         ]
 
 
-class AgentZooHost:
-    """Placeholder for the future AgentZoo plugin protocol.
+class AugentiaHost:
+    """Placeholder for the future Augentia plugin protocol.
 
     The runner currently records stdout/stderr as logs. The next protocol step is
     for the runner to treat structured stdout frames as actions and stdin frames
-    as events. Keeping this behind AgentZooHost makes the WeChat logic stable
+    as events. Keeping this behind AugentiaHost makes the WeChat logic stable
     while the host protocol evolves.
     """
 
@@ -112,7 +112,7 @@ class WeChatBridgePlugin:
         self.config = config
         # WeChatBot() performs QR-code login as part of initialization.
         self.bot = WeChatBot()
-        self.host = AgentZooHost()
+        self.host = AugentiaHost()
         self._stop = asyncio.Event()
         self._last_wechat_user_id: str | None = None
         self._register_handlers()
@@ -128,8 +128,8 @@ class WeChatBridgePlugin:
 
     async def run(self) -> None:
         print("wechat-bridge starting", flush=True)
-        print(f"instance_id={os.getenv('AGENTZOO_PLUGIN_INSTANCE_ID')}", flush=True)
-        print(f"run_id={os.getenv('AGENTZOO_PLUGIN_RUN_ID')}", flush=True)
+        print(f"instance_id={os.getenv('AUGENTIA_PLUGIN_INSTANCE_ID')}", flush=True)
+        print(f"run_id={os.getenv('AUGENTIA_PLUGIN_RUN_ID')}", flush=True)
         print(f"config={self.config}", flush=True)
         print("wechat-bridge delegating to WeChatBot.run()", flush=True)
         bot_task = asyncio.create_task(asyncio.to_thread(self.bot.run))
@@ -162,7 +162,7 @@ class WeChatBridgePlugin:
         if not session_id:
             await self.bot.send(
                 wechat_user_id,
-                "No AgentZoo session is bound for this WeChat user.",
+                "No Augentia session is bound for this WeChat user.",
             )
             print(
                 f"no target session for wechat user={wechat_user_id}; message ignored",
@@ -184,7 +184,7 @@ class WeChatBridgePlugin:
             session_id = self.config.session_for_wechat_user(wechat_user_id)
             await self.bot.send(
                 wechat_user_id,
-                f"AgentZoo WeChat bridge is running. Current session: {session_id or 'not bound'}",
+                f"Augentia WeChat bridge is running. Current session: {session_id or 'not bound'}",
             )
             return
 
@@ -216,13 +216,13 @@ class WeChatBridgePlugin:
                 continue
             event = frame.get("event") or {}
             if event.get("type") == "message.created":
-                await self.on_agentzoo_message_created(event)
+                await self.on_augentia_message_created(event)
 
-    async def on_agentzoo_message_created(self, event: dict[str, Any]) -> None:
-        """Handle AgentZoo message.created events from stdin."""
-        print(f"received AgentZoo event: {event.get('type')} source={event.get('source')}", flush=True)
+    async def on_augentia_message_created(self, event: dict[str, Any]) -> None:
+        """Handle Augentia message.created events from stdin."""
+        print(f"received Augentia event: {event.get('type')} source={event.get('source')}", flush=True)
         source = event.get("source")
-        if source == f"plugin:{os.getenv('AGENTZOO_PLUGIN_INSTANCE_ID')}":
+        if source == f"plugin:{os.getenv('AUGENTIA_PLUGIN_INSTANCE_ID')}":
             print("ignored self-originated event", flush=True)
             return
 

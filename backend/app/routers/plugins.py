@@ -14,7 +14,7 @@ from app.plugins.catalog import PluginCatalog, PluginDefinition, get_plugin_cata
 from app.plugins.registry import PluginRunnerRegistry, get_plugin_registry
 
 
-logger = logging.getLogger("agentzoo.plugins")
+logger = logging.getLogger("augentia.plugins")
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 

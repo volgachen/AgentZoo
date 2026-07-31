@@ -13,7 +13,7 @@ from app.adapters.claude_code import ClaudeCodeAdapter
 from app.adapters.openai_tool_use import OpenAIToolUseAdapter
 from app.core.runner import SessionRunner
 
-logger = logging.getLogger("agentzoo.sessions")
+logger = logging.getLogger("augentia.sessions")
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 

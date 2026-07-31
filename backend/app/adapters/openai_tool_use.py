@@ -10,7 +10,7 @@ import app.adapters.tools  # noqa: F401 — triggers tool registration
 from app.adapters.tools.registry import load_tools
 from app.adapters.tools.base import BaseTool
 
-logger = logging.getLogger("agentzoo.adapter.tool_use")
+logger = logging.getLogger("augentia.adapter.tool_use")
 
 # Tool results can be large (e.g. a fetched web page). The full result still
 # goes to the LLM context (_messages); only the persisted/broadcast copy in the

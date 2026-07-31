@@ -1,6 +1,6 @@
 # WeChat Bridge
 
-This is an AgentZoo runtime plugin that follows the `WeChatBot` usage shown in `E:\Projects\AgentZoo\wechat\example.py`.
+This is an Augentia runtime plugin that follows the `WeChatBot` usage shown in `E:\Projects\Augentia\wechat\example.py`.
 
 ```python
 from wechatbot import WeChatBot
@@ -18,14 +18,14 @@ bot.run()
 
 ## Important startup behavior
 
-`WeChatBot()` performs QR-code login during initialization. The plugin therefore does not request a separate AgentZoo QR-code interaction during startup.
+`WeChatBot()` performs QR-code login during initialization. The plugin therefore does not request a separate Augentia QR-code interaction during startup.
 
 ## Intended behavior
 
 - Initialize `WeChatBot()`, which handles scan-login.
 - Register `@bot.on_message` to receive WeChat messages.
 - Treat messages starting with `command_prefix` as bridge commands.
-- Forward normal WeChat messages into an AgentZoo session via the future `session.message.send` action.
+- Forward normal WeChat messages into an Augentia session via the future `session.message.send` action.
 - Subscribe to future `message.created` events and forward matching Agent replies back to WeChat via `bot.send()`.
 
 ## Example config
@@ -45,6 +45,6 @@ bot.run()
 
 ## Current behavior
 
-The plugin can be started by AgentZoo as a Python runtime plugin if the `wechatbot` package is available in the backend Python environment. It logs incoming WeChat messages and emits structured JSON action frames for future AgentZoo host handling.
+The plugin can be started by Augentia as a Python runtime plugin if the `wechatbot` package is available in the backend Python environment. It logs incoming WeChat messages and emits structured JSON action frames for future Augentia host handling.
 
 The backend runner does not yet consume those structured action frames, so message forwarding into sessions still requires the next plugin protocol step.

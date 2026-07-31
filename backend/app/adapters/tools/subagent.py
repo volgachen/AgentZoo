@@ -7,7 +7,7 @@ import httpx
 from app.adapters.tools.base import BaseTool
 from app.adapters.tools.registry import register_tool
 
-logger = logging.getLogger("agentzoo.tool.subagent")
+logger = logging.getLogger("augentia.tool.subagent")
 
 _CREATE_SESSION_TIMEOUT = 30
 _POST_MESSAGE_TIMEOUT = 15
@@ -16,12 +16,12 @@ _GIT_TIMEOUT = 30
 
 
 def _worktree_root() -> str:
-    # AGENTZOO_WORKTREE_ROOT lets operators relocate subagent worktrees
+    # AUGENTIA_WORKTREE_ROOT lets operators relocate subagent worktrees
     # globally. Resolved at call time (not import) so the env var stays mutable.
     default = os.path.join(
         os.path.dirname(__file__), "..", "..", "..", "tmp", "sessions"
     )
-    return os.getenv("AGENTZOO_WORKTREE_ROOT", default)
+    return os.getenv("AUGENTIA_WORKTREE_ROOT", default)
 
 
 @register_tool
@@ -144,7 +144,7 @@ class SubagentTool(BaseTool):
         except httpx.ConnectError:
             return (
                 f"Error: Cannot connect to gateway at {gateway_url}. "
-                "Is AgentZoo running?"
+                "Is Augentia running?"
             )
         except Exception as e:
             logger.exception("unexpected error creating subagent session")

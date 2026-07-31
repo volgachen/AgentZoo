@@ -61,7 +61,7 @@ def _node_bin() -> str:
 
 
 class NodeReplSession:
-    """Owns one long-lived Node subprocess for a single AgentZoo session.
+    """Owns one long-lived Node subprocess for a single Augentia session.
 
     The codex plugins stash browser runtime state under globalThis.agent and
     reuse it across turns, so unlike bash (fresh subprocess per call) we keep the
@@ -87,7 +87,7 @@ class NodeReplSession:
         # The codex plugin host shim scopes browser tab ownership by this id; it
         # must be stable for the life of the session or tabs.list() comes back
         # empty on every turn.
-        env["AGENTZOO_SESSION_ID"] = self._session_key
+        env["AUGENTIA_SESSION_ID"] = self._session_key
         self._proc = await asyncio.create_subprocess_exec(
             _node_bin(),
             _SERVER,

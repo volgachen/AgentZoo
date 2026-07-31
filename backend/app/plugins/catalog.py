@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 
-logger = logging.getLogger("agentzoo.plugin_catalog")
+logger = logging.getLogger("augentia.plugin_catalog")
 
 PluginScope = Literal["system_side", "session_side", "hybrid"]
 
@@ -28,7 +28,7 @@ class PluginDefinition(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     version: str = "0.0.0"
     scope: PluginScope = "system_side"
-    provider: str = "agentzoo"
+    provider: str = "augentia"
     description: str = ""
     entry: PluginEntry
     capabilities: list[str] = Field(default_factory=list)

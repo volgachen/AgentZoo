@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-logger = logging.getLogger("agentzoo.fs")
+logger = logging.getLogger("augentia.fs")
 router = APIRouter(prefix="/fs", tags=["fs"])
 
 

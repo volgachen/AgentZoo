@@ -7,14 +7,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-logger = logging.getLogger("agentzoo.plugin_events")
+logger = logging.getLogger("augentia.plugin_events")
 
 
 class PluginEvent(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     type: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    source: str = "agentzoo"
+    source: str = "augentia"
     data: dict[str, Any]
 
 

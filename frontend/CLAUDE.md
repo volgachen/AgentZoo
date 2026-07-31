@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Scope
 
-This file covers the AgentZoo **frontend only** — a React 19 + Vite + TypeScript + Tailwind dashboard that talks to the FastAPI backend. The repo-root `../CLAUDE.md` covers the backend and full-stack architecture; read this file for frontend-isolated work.
+This file covers the Augentia **frontend only** — a React 19 + Vite + TypeScript + Tailwind dashboard that talks to the FastAPI backend. The repo-root `../CLAUDE.md` covers the backend and full-stack architecture; read this file for frontend-isolated work.
 
 ## Common commands
 

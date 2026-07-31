@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository
 
-AgentZoo backend — a FastAPI + asyncio gateway that manages sessions over REST + WebSocket and orchestrates pluggable agent adapters (Claude Code CLI, OpenAI tool-use). The frontend lives in `../frontend/`; the full-system design is in `../ARCHITECTURE.md`.
+Augentia backend — a FastAPI + asyncio gateway that manages sessions over REST + WebSocket and orchestrates pluggable agent adapters (Claude Code CLI, OpenAI tool-use). The frontend lives in `../frontend/`; the full-system design is in `../ARCHITECTURE.md`.
 
 ## Common commands
 

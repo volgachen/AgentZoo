@@ -9,7 +9,7 @@ from app.adapters.base import BaseAgentAdapter, StreamEvent, StreamEventType
 from app.db.interface import IAgentDatabase
 from app.models.domain import MessageRole, SessionStatus
 
-logger = logging.getLogger("agentzoo.runner")
+logger = logging.getLogger("augentia.runner")
 
 _SUBSCRIBER_QUEUE_MAX = 256
 

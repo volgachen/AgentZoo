@@ -47,7 +47,7 @@ wiki/
 
 ## 与其他 Agent 通信
 
-你不是孤立运行的。AgentZoo 网关里可能并行跑着别的 agent（比如直播前端 agent），它们会通过 HTTP `POST /api/v1/sessions/{your_session_id}/messages` 给你发消息。每条消息进到你这里时会被自动加上一条前缀，指明发送方：
+你不是孤立运行的。Augentia 网关里可能并行跑着别的 agent（比如直播前端 agent），它们会通过 HTTP `POST /api/v1/sessions/{your_session_id}/messages` 给你发消息。每条消息进到你这里时会被自动加上一条前缀，指明发送方：
 
 ```
 [from-session:<对方的 session uuid>] 实际问题内容...

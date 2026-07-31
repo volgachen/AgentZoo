@@ -3,7 +3,7 @@
 The plugin ships its own operating instructions; rather than paraphrasing them
 (they change between desktop-app versions), we inline the real file and prepend
 the host-specific bits SKILL.md can't know: the resolved absolute plugin root and
-the AgentZoo tool ids that stand in for `mcp__node_repl__js`.
+the Augentia tool ids that stand in for `mcp__node_repl__js`.
 """
 
 import os

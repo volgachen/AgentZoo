@@ -2,7 +2,7 @@
 
 Exercises: list agents -> create session -> get session -> get messages -> delete.
 Uses the Claude Code seed agent because it starts without needing OPENAI env vars.
-Set AGENTZOO_AGENT_ID to override the target agent.
+Set AUGENTIA_AGENT_ID to override the target agent.
 """
 import os
 import sys
@@ -28,7 +28,7 @@ def main() -> int:
             for a in agents:
                 info(f"{a['id']}  ({a['agent_type']})  {a['name']}")
 
-            agent_id = os.getenv("AGENTZOO_AGENT_ID") or "agent-claude-code-001"
+            agent_id = os.getenv("AUGENTIA_AGENT_ID") or "agent-claude-code-001"
             info(f"Using agent: {agent_id}")
 
             r = c.post("/api/v1/sessions", json={"agent_id": agent_id, "initial_prompt": "hello"})

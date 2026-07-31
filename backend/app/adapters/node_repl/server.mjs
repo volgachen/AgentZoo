@@ -1,4 +1,4 @@
-// Persistent Node REPL server for AgentZoo's node_repl tool family.
+// Persistent Node REPL server for Augentia's node_repl tool family.
 //
 // Why this exists: codex plugins (see ../../../codex_plugins/) bootstrap by
 // importing scripts/browser-client.mjs and calling setupBrowserRuntime({
@@ -71,7 +71,7 @@ function freshGlobals() {
 // node_repl_reset treats `nodeRepl` as part of the base environment and does not
 // delete it (the plugins can't bootstrap without it).
 const { installNodeReplHost } = await import("./host_shim.mjs");
-installNodeReplHost({ sessionId: process.env.AGENTZOO_SESSION_ID, emit });
+installNodeReplHost({ sessionId: process.env.AUGENTIA_SESSION_ID, emit });
 
 let baseKeys = new Set(Object.keys(globalThis));
 

@@ -17,7 +17,7 @@ export function installNodeReplHost({ sessionId, emit }) {
   if (globalThis.nodeRepl != null) return globalThis.nodeRepl;
 
   // Tab ownership is scoped by session_id: it MUST stay stable across turns or
-  // tabs.list() comes back empty every time. AgentZoo's session id is the
+  // tabs.list() comes back empty every time. Augentia's session id is the
   // natural key, so the REPL process and the plugin agree on scope.
   const sid = sessionId || crypto.randomUUID();
 
@@ -57,14 +57,14 @@ export function installNodeReplHost({ sessionId, emit }) {
     write: (text) => emit(typeof text === "string" ? text : String(text)),
 
     // Human confirmation for navigation / form submit / uploads / history reads.
-    // AGENTZOO_BROWSER_ELICIT=deny refuses everything; anything else accepts.
+    // AUGENTIA_BROWSER_ELICIT=deny refuses everything; anything else accepts.
     // NOTE: accepting unconditionally bypasses the plugin's entire safety layer
     // on the user's live logged-in Chrome (pitfalls.md #1). The outer guard is
     // that node_repl_js is itself TOOL_CONFIRM-gated, so a human already approved
     // the snippet that triggers this.
     createElicitation: async (req) => {
       const msg = req?.message ?? req?.title ?? JSON.stringify(req);
-      if ((process.env.AGENTZOO_BROWSER_ELICIT || "").toLowerCase() === "deny") {
+      if ((process.env.AUGENTIA_BROWSER_ELICIT || "").toLowerCase() === "deny") {
         emit(`[elicitation DENIED by host policy] ${msg}`);
         return { action: "decline" };
       }

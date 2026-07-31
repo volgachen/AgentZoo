@@ -5,7 +5,7 @@ import httpx
 from app.adapters.tools.base import BaseTool
 from app.adapters.tools.registry import register_tool
 
-logger = logging.getLogger("agentzoo.tool.session_send")
+logger = logging.getLogger("augentia.tool.session_send")
 
 _POST_MESSAGE_TIMEOUT = 15
 
@@ -78,7 +78,7 @@ class SessionSendTool(BaseTool):
         except httpx.ConnectError:
             return (
                 f"Error: Cannot connect to gateway at {gateway_url}. "
-                "Is AgentZoo running?"
+                "Is Augentia running?"
             )
         except Exception as e:
             logger.exception("unexpected error sending to %s", target_session_id)

@@ -9,7 +9,7 @@ from app.plugins.events import PluginEvent, PluginEventBus
 from app.plugins.registry import PluginRunnerRegistry
 
 
-logger = logging.getLogger("agentzoo.plugins.service")
+logger = logging.getLogger("augentia.plugins.service")
 _ACTIVE_STATUSES = {
     PluginStatus.STARTING,
     PluginStatus.WAITING_INPUT,

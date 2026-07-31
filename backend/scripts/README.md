@@ -31,5 +31,5 @@ Each exits 0 on success, nonzero on failure — so they compose in CI or a shell
 
 ## Env overrides
 
-- `AGENTZOO_BASE_URL` — override `http://localhost:12598` for the WS/REST scripts.
-- `AGENTZOO_AGENT_ID` — override the seed agent used by `test_rest_api.py`.
+- `AUGENTIA_BASE_URL` — override `http://localhost:12598` for the WS/REST scripts.
+- `AUGENTIA_AGENT_ID` — override the seed agent used by `test_rest_api.py`.

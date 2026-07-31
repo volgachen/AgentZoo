@@ -16,7 +16,7 @@ from app.plugins.events import PluginEvent
 from app.plugins.log_buffer import LogBuffer, LogLine
 
 
-logger = logging.getLogger("agentzoo.plugin")
+logger = logging.getLogger("augentia.plugin")
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -108,11 +108,11 @@ class PluginRunner:
             try:
                 env = os.environ.copy()
                 env.update({
-                    "AGENTZOO_PLUGIN_ID": definition.id,
-                    "AGENTZOO_PLUGIN_INSTANCE_ID": instance.id,
-                    "AGENTZOO_PLUGIN_RUN_ID": run.id,
-                    "AGENTZOO_PLUGIN_ROOT": str(root),
-                    "AGENTZOO_PLUGIN_CONFIG": json.dumps(instance.config or {}, ensure_ascii=False),
+                    "AUGENTIA_PLUGIN_ID": definition.id,
+                    "AUGENTIA_PLUGIN_INSTANCE_ID": instance.id,
+                    "AUGENTIA_PLUGIN_RUN_ID": run.id,
+                    "AUGENTIA_PLUGIN_ROOT": str(root),
+                    "AUGENTIA_PLUGIN_CONFIG": json.dumps(instance.config or {}, ensure_ascii=False),
                 })
                 self._proc = await asyncio.create_subprocess_exec(
                     sys.executable,

@@ -7,7 +7,7 @@ import httpx
 from app.adapters.tools.base import BaseTool
 from app.adapters.tools.registry import register_tool
 
-logger = logging.getLogger("agentzoo.tool.web_search")
+logger = logging.getLogger("augentia.tool.web_search")
 
 _MAX_RESULTS = 20
 _CURRENT_MONTH_YEAR = datetime.now().strftime("%B %Y")
@@ -89,7 +89,7 @@ class WebSearchTool(BaseTool):
                     "no_html": "1",
                     "skip_disambig": "1",
                 },
-                headers={"User-Agent": "AgentZoo-WebSearch/1.0"},
+                headers={"User-Agent": "Augentia-WebSearch/1.0"},
             )
             data = resp.json()
 

@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 from app.adapters.tools.base import BaseTool
 from app.adapters.tools.registry import register_tool
 
-logger = logging.getLogger("agentzoo.tool.web_fetch")
+logger = logging.getLogger("augentia.tool.web_fetch")
 
 _MAX_CONTENT_CHARS = 100_000
 _MAX_HTTP_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -19,7 +19,7 @@ _MAX_REDIRECTS = 10
 
 _FETCH_HEADERS = {
     "Accept": "text/markdown, text/html, */*",
-    "User-Agent": "AgentZoo-WebFetch/1.0",
+    "User-Agent": "Augentia-WebFetch/1.0",
 }
 
 _SUMMARY_GUIDELINES = (

@@ -1,12 +1,12 @@
-# AgentZoo 插件系统
+# Augentia 插件系统
 
-插件系统用于给 AgentZoo 增加后台能力、外部集成和 Agent 工具能力。当前第一阶段重点支持 `system_side` 插件：由 AgentZoo 托管、可启动/停止/观察的本地后台插件进程。
+插件系统用于给 Augentia 增加后台能力、外部集成和 Agent 工具能力。当前第一阶段重点支持 `system_side` 插件：由 Augentia 托管、可启动/停止/观察的本地后台插件进程。
 
 ## 插件作用域
 
 插件按作用域分为三类：
 
-- `system_side`：系统侧插件。作用于整个 AgentZoo 后台，不绑定某一个 session，例如微信桥接、邮箱监听、定时任务、webhook 监听。
+- `system_side`：系统侧插件。作用于整个 Augentia 后台，不绑定某一个 session，例如微信桥接、邮箱监听、定时任务、webhook 监听。
 - `session_side`：会话侧插件。只插入某个 session 的运行过程，不影响整个系统，例如 Codex/OpenClaw、某个 session 专用 MCP、prompt/skill 包或临时工具能力。
 - `hybrid`：混合插件。既有系统侧后台实例，又能给 session 提供能力。
 
@@ -34,7 +34,7 @@ plugins/
   "name": "WeChat Bridge",
   "version": "0.1.0",
   "scope": "system_side",
-  "provider": "agentzoo",
+  "provider": "augentia",
   "entry": {
     "type": "python",
     "main": "src/main.py"
@@ -119,10 +119,10 @@ stopped -> starting -> running -> exited/errored
 
 ## Runtime 插件的运行方式
 
-Runtime 插件被看作 AgentZoo 托管的本地后台进程。它有点像微服务，但不是独立部署服务：
+Runtime 插件被看作 Augentia 托管的本地后台进程。它有点像微服务，但不是独立部署服务：
 
 ```text
-AgentZoo backend
+Augentia backend
   -> 扫描 plugin.json
   -> 创建 plugin_instance
   -> 创建 plugin_run
@@ -146,20 +146,20 @@ AgentZoo backend
 启动插件时，Runner 会给子进程传入环境变量：
 
 ```text
-AGENTZOO_PLUGIN_ID
-AGENTZOO_PLUGIN_INSTANCE_ID
-AGENTZOO_PLUGIN_RUN_ID
-AGENTZOO_PLUGIN_ROOT
-AGENTZOO_PLUGIN_CONFIG
+AUGENTIA_PLUGIN_ID
+AUGENTIA_PLUGIN_INSTANCE_ID
+AUGENTIA_PLUGIN_RUN_ID
+AUGENTIA_PLUGIN_ROOT
+AUGENTIA_PLUGIN_CONFIG
 ```
 
-插件代码可以通过 `AGENTZOO_PLUGIN_CONFIG` 读取实例配置。
+插件代码可以通过 `AUGENTIA_PLUGIN_CONFIG` 读取实例配置。
 
 ## 插件协议
 
 第一阶段使用 stdio JSON Lines 协议。
 
-AgentZoo 通过 stdin 向插件发送事件：
+Augentia 通过 stdin 向插件发送事件：
 
 ```json
 {
@@ -167,7 +167,7 @@ AgentZoo 通过 stdin 向插件发送事件：
   "event": {
     "id": "event-id",
     "type": "message.created",
-    "source": "agentzoo",
+    "source": "augentia",
     "data": {
       "session_id": "...",
       "role": "agent",
@@ -177,7 +177,7 @@ AgentZoo 通过 stdin 向插件发送事件：
 }
 ```
 
-插件通过 stdout 请求 AgentZoo 执行动作：
+插件通过 stdout 请求 Augentia 执行动作：
 
 ```json
 {
@@ -254,7 +254,7 @@ message.created
 plugins/wechat-bridge/
 ```
 
-它基于 `E:\Projects\AgentZoo\wechat\example.py` 中的用法：
+它基于 `E:\Projects\Augentia\wechat\example.py` 中的用法：
 
 ```python
 from wechatbot import WeChatBot
@@ -275,13 +275,13 @@ bot.run()
 微信插件当前流程：
 
 ```text
-AgentZoo 启动 plugin instance
+Augentia 启动 plugin instance
   -> Runner 启动 plugins/wechat-bridge/src/main.py
   -> WeChatBot() 初始化并处理扫码登录
   -> bot.run() 开始 long-poll
   -> @bot.on_message 收到微信消息
   -> 普通消息输出 session.message.send action
-  -> AgentZoo action dispatcher 把消息送进 session
+  -> Augentia action dispatcher 把消息送进 session
   -> Agent 回复写入数据库
   -> message.created 事件发送给微信插件 stdin
   -> 微信插件调用 bot.send() 发回绑定用户

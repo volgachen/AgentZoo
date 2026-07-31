@@ -13,8 +13,8 @@ def setup_logging() -> None:
     if _configured:
         return
     _configured = True
-    debug = os.getenv("AGENTZOO_DEBUG", "").lower() in ("1", "true", "yes")
-    level_name = os.getenv("AGENTZOO_LOG_LEVEL", "DEBUG" if debug else "INFO").upper()
+    debug = os.getenv("AUGENTIA_DEBUG", "").lower() in ("1", "true", "yes")
+    level_name = os.getenv("AUGENTIA_LOG_LEVEL", "DEBUG" if debug else "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
 
     fmt = (
@@ -36,6 +36,6 @@ def setup_logging() -> None:
         for name in ("httpx", "httpcore", "openai", "websockets", "asyncio"):
             logging.getLogger(name).setLevel(logging.WARNING)
 
-    logging.getLogger("agentzoo").info(
+    logging.getLogger("augentia").info(
         "Logging configured: level=%s debug=%s", level_name, debug
     )

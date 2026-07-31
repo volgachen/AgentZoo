@@ -5,7 +5,7 @@ from app.adapters.tools.registry import register_tool
 from app.adapters.tools._task_scope import task_list_id, open_blocked_by
 from app.db.deps import get_db
 
-logger = logging.getLogger("agentzoo.tool.task_get")
+logger = logging.getLogger("augentia.tool.task_get")
 
 
 @register_tool

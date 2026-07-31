@@ -52,7 +52,7 @@ async def main() -> int:
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         td = Path(td)
         wt_root = td / "worktrees"
-        os.environ["AGENTZOO_WORKTREE_ROOT"] = str(wt_root)
+        os.environ["AUGENTIA_WORKTREE_ROOT"] = str(wt_root)
 
         parent_repo = td / "parent"
         _make_repo(parent_repo)
@@ -69,7 +69,7 @@ async def main() -> int:
         else:
             fail("worktree missing or does not see parent files"); failures += 1
         if str(wt_root) in os.path.abspath(work_dir):
-            ok("worktree lives under AGENTZOO_WORKTREE_ROOT")
+            ok("worktree lives under AUGENTIA_WORKTREE_ROOT")
         else:
             fail(f"worktree not under configured root: {work_dir}"); failures += 1
         # clean up the worktree so the temp dir can be removed

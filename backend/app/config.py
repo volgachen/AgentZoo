@@ -9,7 +9,7 @@ class Settings:
         self.mysql_port: int = int(os.getenv("MYSQL_PORT", "3306"))
         self.mysql_user: str = os.getenv("MYSQL_USER", "root")
         self.mysql_password: str = os.getenv("MYSQL_PASSWORD", "")
-        self.mysql_database: str = os.getenv("MYSQL_DATABASE", "agentzoo")
+        self.mysql_database: str = os.getenv("MYSQL_DATABASE", "augentia")
 
 
 @lru_cache(maxsize=1)

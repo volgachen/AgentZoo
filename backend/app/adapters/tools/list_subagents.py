@@ -5,7 +5,7 @@ import httpx
 from app.adapters.tools.base import BaseTool
 from app.adapters.tools.registry import register_tool
 
-logger = logging.getLogger("agentzoo.tool.list_subagents")
+logger = logging.getLogger("augentia.tool.list_subagents")
 
 _LIST_TIMEOUT = 15
 _MESSAGES_TIMEOUT = 15
@@ -58,7 +58,7 @@ class ListSubagentsTool(BaseTool):
         except httpx.ConnectError:
             return (
                 f"Error: Cannot connect to gateway at {gateway_url}. "
-                "Is AgentZoo running?"
+                "Is Augentia running?"
             )
         except Exception as e:
             logger.exception("unexpected error listing sessions")

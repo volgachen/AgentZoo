@@ -23,7 +23,7 @@ AGENT = "agent-research-001"  # research agent: gates write/edit/session_send
 async def main(approve: bool) -> None:
     async with httpx.AsyncClient(trust_env=False, timeout=30) as c:
         # Fresh working dir so the write tool has somewhere to land.
-        wd = "E:/Projects/AgentZoo/backend/tmp/confirm_test_wd"
+        wd = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tmp", "confirm_test_wd"))
         os.makedirs(wd, exist_ok=True)
         r = await c.post(
             f"{BASE}/sessions",

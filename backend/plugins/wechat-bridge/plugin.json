@@ -3,8 +3,8 @@
   "name": "WeChat Bridge",
   "version": "0.1.0",
   "scope": "system_side",
-  "provider": "agentzoo",
-  "description": "Forward messages between WeChat and AgentZoo sessions using the wechatbot.WeChatBot runtime.",
+  "provider": "augentia",
+  "description": "Forward messages between WeChat and Augentia sessions using the wechatbot.WeChatBot runtime.",
   "entry": {
     "type": "python",
     "main": "src/main.py"

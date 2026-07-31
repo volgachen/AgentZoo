@@ -1,6 +1,6 @@
 # Database Structure
 
-AgentZoo persists runtime state through the `IAgentDatabase` interface (`app/db/interface.py`). The canonical MySQL schema lives in `app/db/mysql.py` (`_SCHEMA_SQL`); `MockMemoryDatabase` (`app/db/mock.py`) mirrors the same shapes in memory. `DB_TYPE` (`mysql` | `mock`) in `.env` selects the implementation.
+Augentia persists runtime state through the `IAgentDatabase` interface (`app/db/interface.py`). The canonical MySQL schema lives in `app/db/mysql.py` (`_SCHEMA_SQL`); `MockMemoryDatabase` (`app/db/mock.py`) mirrors the same shapes in memory. `DB_TYPE` (`mysql` | `mock`) in `.env` selects the implementation.
 
 The MySQL schema is auto-created idempotently (`CREATE TABLE IF NOT EXISTS`) on startup via the FastAPI `lifespan` → `MySqlDatabase.connect()`.
 

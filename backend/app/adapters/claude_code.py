@@ -6,7 +6,7 @@ import uuid
 from typing import AsyncGenerator
 from app.adapters.base import BaseAgentAdapter, StreamEvent, StreamEventType
 
-logger = logging.getLogger("agentzoo.adapter.claude_code")
+logger = logging.getLogger("augentia.adapter.claude_code")
 
 
 class ClaudeCodeAdapter(BaseAgentAdapter):
