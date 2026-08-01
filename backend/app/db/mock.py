@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, List
 from app.db.interface import IAgentDatabase, _UNSET
@@ -134,6 +135,7 @@ class MockMemoryDatabase(IAgentDatabase):
         agent_id: str,
         working_dir: str | None = None,
         *,
+        session_id: str | None = None,
         title: str | None = None,
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
@@ -141,6 +143,7 @@ class MockMemoryDatabase(IAgentDatabase):
     ) -> Session:
         agent = await self.get_agent(agent_id)  # validate agent exists
         session = Session(
+            id=session_id or str(uuid.uuid4()),
             agent_id=agent_id,
             title=title,
             working_dir=working_dir,

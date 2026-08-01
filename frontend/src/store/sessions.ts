@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Message, Session, SessionStatus, StreamEvent, Task } from "../api/types";
+import type { Message, Session, SessionCreateMode, SessionStatus, StreamEvent, Task } from "../api/types";
 import { api, createSessionSocket } from "../api/client";
 import { useToastStore } from "./toasts";
 
@@ -119,8 +119,9 @@ interface Store {
   openSession: (sessionId: string) => Promise<void>;
   launchSession: (
     agentId: string,
-    workingDir?: string | null,
-    templateDir?: string | null,
+    sourceDir: string,
+    createMode?: SessionCreateMode,
+    title?: string | null,
     additionalPrompt?: string | null,
     additionalPromptPath?: string | null,
   ) => Promise<string>;
@@ -428,8 +429,22 @@ export const useStore = create<Store>((set, get) => {
       });
     },
 
-    launchSession: async (agentId, workingDir = null, templateDir = null, additionalPrompt = null, additionalPromptPath = null) => {
-      const session = await api.sessions.create(agentId, workingDir, templateDir, additionalPrompt, additionalPromptPath);
+    launchSession: async (
+      agentId,
+      sourceDir,
+      createMode = "use_existing_directory",
+      title = null,
+      additionalPrompt = null,
+      additionalPromptPath = null,
+    ) => {
+      const session = await api.sessions.create(
+        agentId,
+        sourceDir,
+        createMode,
+        title,
+        additionalPrompt,
+        additionalPromptPath,
+      );
       const socket = attachSocket(session.id);
 
       set((s) => ({

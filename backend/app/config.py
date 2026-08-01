@@ -10,6 +10,10 @@ class Settings:
         self.mysql_user: str = os.getenv("MYSQL_USER", "root")
         self.mysql_password: str = os.getenv("MYSQL_PASSWORD", "")
         self.mysql_database: str = os.getenv("MYSQL_DATABASE", "augentia")
+        self.worktree_root: str = os.getenv(
+            "AUGENTIA_WORKTREE_ROOT",
+            os.path.join(os.path.expanduser("~"), ".augentia", "worktrees"),
+        )
 
 
 @lru_cache(maxsize=1)

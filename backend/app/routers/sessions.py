@@ -1,10 +1,15 @@
 import asyncio
 import json
 import logging
+import re
 import shutil
+import subprocess
+import uuid
+from enum import Enum
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from app.config import get_settings
 from app.db.interface import IAgentDatabase
 from app.db.deps import get_db
 from app.models.domain import Session, SessionStatus, MessageRole, AgentType, AgentTemplate
@@ -17,15 +22,22 @@ logger = logging.getLogger("augentia.sessions")
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
+class CreateMode(str, Enum):
+    USE_EXISTING_DIRECTORY = "use_existing_directory"
+    DUPLICATE_BY_COPY = "duplicate_by_copy"
+    GIT_WORKTREE = "git_worktree"
+
+
 class CreateSessionRequest(BaseModel):
     agent_id: str
     # Optional friendly label. When omitted, the DB seeds one from the agent
     # name + creation time. Spawned sub-sessions pass their task description here.
     title: str | None = None
-    working_dir: str | None = None
-    # When set, the server copies template_dir -> working_dir before starting
-    # the adapter. working_dir must not already exist in that case.
-    template_dir: str | None = None
+    # Directory selected by the user. For use_existing_directory it becomes the
+    # final working directory. For copy/worktree modes it is the source used to
+    # create a new final working directory under AUGENTIA_WORKTREE_ROOT.
+    source_dir: str | None = None
+    create_mode: CreateMode = CreateMode.USE_EXISTING_DIRECTORY
     # Session that is spawning this one (the caller's own session id). Recorded
     # on the new Session and exported to child processes as PARENT_SESSION_ID so
     # the child can report results back to its parent.
@@ -101,6 +113,67 @@ async def _build_runner(
     return runner
 
 
+def _slugify_folder_name(value: str | None) -> str:
+    if not value:
+        return "source"
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip(".-_")
+    return slug[:48] or "source"
+
+
+def _worktree_root() -> Path:
+    root = Path(get_settings().worktree_root).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _target_dir_for_session(root: Path, source: Path, session_id: str) -> Path:
+    source_name = _slugify_folder_name(source.name)
+    candidate = root / f"{source_name}-{session_id[:8]}"
+    if candidate.exists():
+        raise HTTPException(
+            status_code=409,
+            detail=f"working directory already exists, refusing to overwrite: {candidate}",
+        )
+    return candidate
+
+
+def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def _ensure_git_repository(path: Path) -> None:
+    result = _run_git(["rev-parse", "--show-toplevel"], path)
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"selected directory is not inside a Git repository: {path}",
+        )
+
+
+def _create_git_worktree(source_dir: Path, target_dir: Path) -> None:
+    _ensure_git_repository(source_dir)
+    branch = f"augentia/{target_dir.name}"
+    result = _run_git(["worktree", "add", "-b", branch, str(target_dir)], source_dir)
+    if result.returncode != 0:
+        logger.warning(
+            "git worktree add with branch failed cwd=%s target=%s stderr=%s",
+            source_dir, target_dir, result.stderr,
+        )
+        fallback = _run_git(["worktree", "add", str(target_dir)], source_dir)
+        if fallback.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"git worktree creation failed: {fallback.stderr or fallback.stdout}",
+            )
+
+
 async def _get_or_rehydrate(
     session: Session,
     db: IAgentDatabase,
@@ -143,8 +216,8 @@ async def create_session(
     registry: AdapterRegistry = Depends(get_registry),
 ):
     logger.info(
-        "create_session agent=%s working_dir=%s template_dir=%s parent=%s",
-        body.agent_id, body.working_dir, body.template_dir, body.parent_session_id,
+        "create_session agent=%s source_dir=%s create_mode=%s parent=%s",
+        body.agent_id, body.source_dir, body.create_mode, body.parent_session_id,
     )
     try:
         agent = await db.get_agent(body.agent_id)
@@ -162,33 +235,41 @@ async def create_session(
                 detail=f"parent_session_id '{body.parent_session_id}' not found",
             )
 
-    working_dir = body.working_dir
-    if body.template_dir:
-        if not working_dir:
+    session_id = str(uuid.uuid4())
+
+    source: Path | None = None
+    if body.source_dir:
+        source = Path(body.source_dir).expanduser().resolve()
+        if not source.is_dir():
+            raise HTTPException(status_code=400, detail=f"source_dir does not exist: {source}")
+
+    if body.create_mode == CreateMode.USE_EXISTING_DIRECTORY:
+        working_dir = str(source) if source else None
+    elif body.create_mode in (CreateMode.DUPLICATE_BY_COPY, CreateMode.GIT_WORKTREE):
+        if source is None:
             raise HTTPException(
                 status_code=400,
-                detail="working_dir is required when template_dir is set (it is the copy target)",
+                detail="source_dir is required for copy/worktree modes",
             )
-        src = Path(body.template_dir)
-        dst = Path(working_dir)
-        if not src.is_dir():
-            raise HTTPException(status_code=400, detail=f"template_dir does not exist: {src}")
-        if dst.exists():
-            raise HTTPException(
-                status_code=409,
-                detail=f"working_dir already exists, refusing to overwrite: {dst}",
-            )
-        try:
-            shutil.copytree(src, dst)
-        except (OSError, shutil.Error) as e:
-            logger.exception("copytree failed src=%s dst=%s", src, dst)
-            raise HTTPException(status_code=500, detail=f"copy failed: {e}")
-        working_dir = str(dst.resolve())
-        logger.info("copied template %s -> %s", src, working_dir)
+        target = _target_dir_for_session(_worktree_root(), source, session_id)
+        if body.create_mode == CreateMode.DUPLICATE_BY_COPY:
+            try:
+                shutil.copytree(source, target)
+            except (OSError, shutil.Error) as e:
+                logger.exception("copytree failed src=%s dst=%s", source, target)
+                raise HTTPException(status_code=500, detail=f"copy failed: {e}")
+            logger.info("copied source directory %s -> %s", source, target)
+        else:
+            _create_git_worktree(source, target)
+            logger.info("created git worktree from %s -> %s", source, target)
+        working_dir = str(target.resolve())
+    else:
+        raise HTTPException(status_code=400, detail=f"unsupported create_mode: {body.create_mode}")
 
     session = await db.create_session(
         body.agent_id,
         working_dir=working_dir,
+        session_id=session_id,
         title=body.title,
         parent_session_id=body.parent_session_id,
         additional_prompt=body.additional_prompt,
