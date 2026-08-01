@@ -208,7 +208,10 @@ async def create_session(
         raise HTTPException(status_code=500, detail=str(e))
     logger.info("registered runner for session=%s type=%s", session.id, agent.agent_type)
 
-    await db.update_session_status(session.id, SessionStatus.RUNNING)
+    # The adapter is now live, but no turn is running until a user message is
+    # submitted. Mark the session as waiting for user input rather than RUNNING
+    # so status consistently means turn execution state, not adapter liveness.
+    await db.update_session_status(session.id, SessionStatus.WAITING_USER)
     return await db.get_session(session.id)
 
 

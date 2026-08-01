@@ -230,7 +230,7 @@ export default function LiveConsole() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entry?.events.length, entry?.generating]);
+  }, [entry?.events.length, entry?.session.status]);
 
   if (!entry) {
     return (
@@ -247,7 +247,7 @@ export default function LiveConsole() {
   }
 
   const { session, events } = entry;
-  const generating = entry.generating;
+  const generating = session.status === "RUNNING";
 
   const handleSend = () => {
     const msg = input.trim();

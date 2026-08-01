@@ -13,7 +13,6 @@ interface SessionEntry {
   session: Session;
   events: StreamEvent[];
   socket: WebSocket | null;
-  generating: boolean;
   tasks: Task[];
   // True when this background session newly needs user attention and has not
   // been opened since that state change.
@@ -234,11 +233,6 @@ export const useStore = create<Store>((set, get) => {
               attentionUnread: isCurrent
                 ? false
                 : entry.attentionUnread || becameWaiting,
-              generating: isTerminal
-                ? false
-                : isUser
-                  ? true
-                  : entry.generating,
             },
           },
         };
@@ -246,16 +240,6 @@ export const useStore = create<Store>((set, get) => {
     };
 
     socket.onclose = () => {
-      set((s) => {
-        const entry = s.sessions[sessionId];
-        if (!entry) return s;
-        return {
-          sessions: {
-            ...s.sessions,
-            [sessionId]: { ...entry, generating: false },
-          },
-        };
-      });
       // Refresh session status from server on disconnect
       get().refreshSession(sessionId);
     };
@@ -324,7 +308,6 @@ export const useStore = create<Store>((set, get) => {
               session,
               events: [],
               socket: null,
-              generating: false,
               tasks: [],
               attentionUnread: false,
               pendingConfirms: [],
@@ -385,14 +368,13 @@ export const useStore = create<Store>((set, get) => {
                     parent_session_id: null,
                     additional_prompt: null,
                     additional_prompt_path: null,
-                    status: "RUNNING",
+                    status: "INITIALIZING",
                     created_at: "",
                     updated_at: "",
                     last_message_at: null,
                   },
                   events: [],
                   socket,
-                  generating: false,
                   tasks: [],
                   attentionUnread: false,
                   pendingConfirms: [],
@@ -439,7 +421,6 @@ export const useStore = create<Store>((set, get) => {
             session,
             events: [],
             socket,
-            generating: false,
             tasks: [],
             attentionUnread: false,
             pendingConfirms: [],
@@ -462,7 +443,7 @@ export const useStore = create<Store>((set, get) => {
             ...s.sessions,
             [sessionId]: {
               ...cur,
-              generating: true,
+              session: { ...cur.session, status: "RUNNING" },
             },
           },
         };

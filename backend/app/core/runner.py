@@ -42,7 +42,6 @@ class SessionRunner:
         self._inbox: asyncio.Queue[_InboxItem] = asyncio.Queue()
         self._subscribers: set[asyncio.Queue[StreamEvent | None]] = set()
         self._task: asyncio.Task | None = None
-        self._generating = False
         # TOOL_CONFIRM events are broadcast-only (not persisted), so a client
         # that connects/reconnects while a tool is awaiting approval would never
         # see the confirm panel. Cache the currently-pending confirm events here
@@ -100,10 +99,6 @@ class SessionRunner:
         if call_id:
             self._pending_confirms[call_id] = event
 
-    @property
-    def is_generating(self) -> bool:
-        return self._generating
-
     @asynccontextmanager
     async def subscribe(self) -> AsyncIterator[AsyncIterator[StreamEvent]]:
         q: asyncio.Queue[StreamEvent | None] = asyncio.Queue(maxsize=_SUBSCRIBER_QUEUE_MAX)
@@ -154,7 +149,6 @@ class SessionRunner:
             except Exception as e:
                 logger.exception("runner turn crashed session=%s", self._session_id)
                 self._broadcast(StreamEvent(type=StreamEventType.ERROR, data=str(e)))
-                self._generating = False
                 try:
                     await self._db.update_session_status(self._session_id, SessionStatus.ERROR)
                 except Exception:
@@ -176,68 +170,64 @@ class SessionRunner:
         )
         self._broadcast(StreamEvent(type=StreamEventType.USER, data=delivered))
 
-        self._generating = True
         agent_buf: list[str] = []
         saw_native_messages = False
         errored = False
         awaiting_confirm = False
-        try:
-            await self._adapter.send(delivered)
-            async for event in self._adapter.stream():
-                should_broadcast = True
-                # Reflect a pending confirm in the session status so the
-                # dashboard shows "waiting for approval"; flip back to RUNNING
-                # once the gate clears (the tool result or next event arrives).
-                if event.type == StreamEventType.TOOL_CONFIRM:
-                    awaiting_confirm = True
-                    self._remember_confirm(event)
-                    await self._db.update_session_status(
-                        self._session_id, SessionStatus.WAITING_CONFIRM
-                    )
-                elif awaiting_confirm:
-                    awaiting_confirm = False
-                    # The confirm has cleared (user made a decision or tool executed).
-                    # Don't clear _pending_confirms here — resolve_decision already
-                    # removed the entry when the user approved/denied. If we clear here,
-                    # a disconnect before TOOL_RESULT arrives would prevent replay on
-                    # reconnect.
-                    await self._db.update_session_status(
-                        self._session_id, SessionStatus.RUNNING
-                    )
-                if event.type == StreamEventType.ASSISTANT_MESSAGE:
-                    saw_native_messages = True
+        await self._adapter.send(delivered)
+        async for event in self._adapter.stream():
+            should_broadcast = True
+            # Reflect a pending confirm in the session status so the
+            # dashboard shows "waiting for approval"; flip back to RUNNING
+            # once the gate clears (the tool result or next event arrives).
+            if event.type == StreamEventType.TOOL_CONFIRM:
+                awaiting_confirm = True
+                self._remember_confirm(event)
+                await self._db.update_session_status(
+                    self._session_id, SessionStatus.WAITING_CONFIRM
+                )
+            elif awaiting_confirm:
+                awaiting_confirm = False
+                # The confirm has cleared (user made a decision or tool executed).
+                # Don't clear _pending_confirms here — resolve_decision already
+                # removed the entry when the user approved/denied. If we clear here,
+                # a disconnect before TOOL_RESULT arrives would prevent replay on
+                # reconnect.
+                await self._db.update_session_status(
+                    self._session_id, SessionStatus.RUNNING
+                )
+            if event.type == StreamEventType.ASSISTANT_MESSAGE:
+                saw_native_messages = True
+                await self._db.add_message(
+                    self._session_id, MessageRole.AGENT, event.data
+                )
+                agent_buf.clear()
+            elif event.type == StreamEventType.TOOL_MESSAGE:
+                saw_native_messages = True
+                await self._db.add_message(
+                    self._session_id, MessageRole.TOOL, event.data
+                )
+            elif event.type == StreamEventType.TEXT:
+                if saw_native_messages:
+                    should_broadcast = False
+                else:
+                    agent_buf.append(event.data)
+            elif event.type == StreamEventType.TOOL_CALL:
+                if saw_native_messages:
+                    should_broadcast = False
+                else:
                     await self._db.add_message(
-                        self._session_id, MessageRole.AGENT, event.data
+                        self._session_id, MessageRole.TOOL_CALL, event.data
                     )
-                    agent_buf.clear()
-                elif event.type == StreamEventType.TOOL_MESSAGE:
-                    saw_native_messages = True
+            elif event.type == StreamEventType.TOOL_RESULT:
+                if not saw_native_messages:
                     await self._db.add_message(
                         self._session_id, MessageRole.TOOL, event.data
                     )
-                elif event.type == StreamEventType.TEXT:
-                    if saw_native_messages:
-                        should_broadcast = False
-                    else:
-                        agent_buf.append(event.data)
-                elif event.type == StreamEventType.TOOL_CALL:
-                    if saw_native_messages:
-                        should_broadcast = False
-                    else:
-                        await self._db.add_message(
-                            self._session_id, MessageRole.TOOL_CALL, event.data
-                        )
-                elif event.type == StreamEventType.TOOL_RESULT:
-                    if not saw_native_messages:
-                        await self._db.add_message(
-                            self._session_id, MessageRole.TOOL, event.data
-                        )
-                elif event.type == StreamEventType.ERROR:
-                    errored = True
-                if should_broadcast:
-                    self._broadcast(event)
-        finally:
-            self._generating = False
+            elif event.type == StreamEventType.ERROR:
+                errored = True
+            if should_broadcast:
+                self._broadcast(event)
 
         if agent_buf and not saw_native_messages:
             await self._db.add_message(
