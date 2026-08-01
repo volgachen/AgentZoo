@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import { useEffect, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store/sessions";
 import { useToastStore, type AppToast } from "../store/toasts";
@@ -8,11 +8,18 @@ function formatToolDetail(toast: AppToast): string {
   return `${toast.confirm.toolName}(${JSON.stringify(toast.confirm.args, null, 2)})`;
 }
 
+const TOAST_TTL_MS = 15_000;
+
 function ToastCard({ toast }: { toast: AppToast }) {
   const navigate = useNavigate();
   const setActiveSession = useStore((s) => s.setActiveSession);
   const resolveConfirm = useStore((s) => s.resolveConfirm);
   const dismissToast = useToastStore((s) => s.dismissToast);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => dismissToast(toast.id), TOAST_TTL_MS);
+    return () => window.clearTimeout(timer);
+  }, [dismissToast, toast.id]);
 
   const openSession = () => {
     dismissToast(toast.id);
@@ -92,15 +99,13 @@ function ToastCard({ toast }: { toast: AppToast }) {
 }
 
 export default function ToastCenter() {
-  const toasts = useToastStore((s) => s.toasts);
+  const currentToast = useToastStore((s) => s.toasts[0]);
 
-  if (toasts.length === 0) return null;
+  if (!currentToast) return null;
 
   return (
-    <div className="fixed right-4 top-16 z-50 flex flex-col gap-2">
-      {toasts.map((toast) => (
-        <ToastCard key={toast.id} toast={toast} />
-      ))}
+    <div className="fixed right-4 top-16 z-50">
+      <ToastCard key={currentToast.id} toast={currentToast} />
     </div>
   );
 }

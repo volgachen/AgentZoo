@@ -73,6 +73,11 @@ function dismissSessionToasts(sessionId: string): void {
   useToastStore.getState().dismissSessionToasts(sessionId);
 }
 
+function isViewingSession(sessionId: string): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname === `/console/${sessionId}`;
+}
+
 function toolMessageToEventData(content: string): string {
   try {
     const obj = JSON.parse(content);
@@ -150,7 +155,7 @@ export const useStore = create<Store>((set, get) => {
             entry.session.status,
             nextSession.status,
           );
-          const isCurrent = s.activeSessionId === sessionId;
+          const isCurrent = s.activeSessionId === sessionId || isViewingSession(sessionId);
           if (!isCurrent && becameWaiting && nextSession.status === "WAITING_USER") {
             notifyWaitingUser(nextSession);
           }
@@ -182,7 +187,7 @@ export const useStore = create<Store>((set, get) => {
         const nextSession = inferredStatus
           ? { ...entry.session, status: inferredStatus }
           : entry.session;
-        const isCurrent = s.activeSessionId === sessionId;
+        const isCurrent = s.activeSessionId === sessionId || isViewingSession(sessionId);
         const becameWaiting = shouldMarkAttentionUnread(
           entry.session.status,
           nextSession.status,
@@ -302,7 +307,7 @@ export const useStore = create<Store>((set, get) => {
               existing.session.status,
               session.status,
             );
-            const isCurrent = s.activeSessionId === session.id;
+            const isCurrent = s.activeSessionId === session.id || isViewingSession(session.id);
             if (!isCurrent && becameWaiting) {
               if (session.status === "WAITING_USER") {
                 notifyWaitingUser(session);

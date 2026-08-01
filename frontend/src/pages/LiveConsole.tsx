@@ -331,7 +331,7 @@ export default function LiveConsole() {
   };
 
   return (
-    <div className="flex flex-col h-full p-4 gap-3">
+    <div className="relative flex flex-col h-full p-4 gap-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-white">
@@ -408,7 +408,7 @@ export default function LiveConsole() {
 
       {/* Pending tool confirmations */}
       {entry.pendingConfirms.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div className="pointer-events-none absolute inset-x-4 bottom-24 z-30 flex flex-col items-stretch gap-2 lg:right-[21.75rem]">
           {entry.pendingConfirms.map((pc) => (
             <ToolConfirmPanel
               key={pc.call_id}
