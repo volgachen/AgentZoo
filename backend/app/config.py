@@ -10,6 +10,7 @@ class Settings:
         self.mysql_user: str = os.getenv("MYSQL_USER", "root")
         self.mysql_password: str = os.getenv("MYSQL_PASSWORD", "")
         self.mysql_database: str = os.getenv("MYSQL_DATABASE", "augentia")
+        self.sqlite_path: str = os.getenv("SQLITE_PATH", "backend/.local/augentia.db")
 
 
 @lru_cache(maxsize=1)
