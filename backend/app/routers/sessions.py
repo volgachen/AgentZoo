@@ -59,6 +59,10 @@ class PostMessageRequest(BaseModel):
     from_session_id: str | None = None
 
 
+class RetryMessageRequest(BaseModel):
+    content: str
+
+
 async def _build_runner(
     session: Session,
     agent: AgentTemplate,
@@ -352,6 +356,47 @@ async def post_message(
     return {"status": "queued"}
 
 
+@router.post("/{session_id}/messages/{message_id}/retry", status_code=202)
+async def retry_from_message(
+    session_id: str,
+    message_id: str,
+    body: RetryMessageRequest,
+    db: IAgentDatabase = Depends(get_db),
+    registry: AdapterRegistry = Depends(get_registry),
+):
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content must not be empty")
+    try:
+        session = await db.get_session(session_id)
+        messages = await db.get_messages(session_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    target = next((m for m in messages if m.id == message_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Message '{message_id}' not found")
+    if target.role != MessageRole.USER:
+        raise HTTPException(status_code=400, detail="only user messages can be retried")
+    agent = await db.get_agent(session.agent_id)
+    if agent.agent_type != AgentType.TOOL_USE:
+        raise HTTPException(
+            status_code=409,
+            detail="retrying from history is currently supported only for tool_use sessions",
+        )
+    await db.soft_delete_messages_from(session_id, message_id)
+
+    # Drop any in-memory context that still contains the deleted suffix, then
+    # rebuild it from the now-filtered persisted history before submitting the
+    # edited user turn.
+    await registry.remove(session_id)
+    runner = await _get_or_rehydrate(session, db, registry)
+    if runner is None:
+        raise HTTPException(status_code=409, detail="session has no live adapter")
+    logger.info("HTTP retry session=%s message=%s len=%d", session_id, message_id, len(content))
+    await runner.submit(content)
+    return {"status": "queued"}
+
+
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(
     session_id: str,
@@ -365,7 +410,7 @@ async def delete_session(
         raise HTTPException(status_code=404, detail=str(e))
 
     await registry.remove(session_id)
-    await db.update_session_status(session_id, SessionStatus.COMPLETED)
+    await db.soft_delete_session(session_id)
 
 
 @router.websocket("/{session_id}/stream")
@@ -455,6 +500,7 @@ async def _stub_loop(ws: WebSocket, session_id: str, db: IAgentDatabase) -> None
             raw = await ws.receive_text()
             payload = json.loads(raw)
             content = payload.get("content", "")
+            await db.get_session(session_id)
             await db.add_message(session_id, MessageRole.USER, content)
             stub = f"[stub] Received: {content}"
             await db.add_message(session_id, MessageRole.AGENT, stub)

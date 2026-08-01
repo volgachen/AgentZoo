@@ -101,17 +101,17 @@ function toolMessageToEventData(content: string): string {
 function messageToEvent(m: Message): StreamEvent {
   switch (m.role) {
     case "user":
-      return { type: "user", data: m.content };
+      return { type: "user", data: m.content, message_id: m.id };
     case "tool_call":
-      return { type: "tool_call", data: m.content };
+      return { type: "tool_call", data: m.content, message_id: m.id };
     case "tool":
-      return { type: "tool_result", data: toolMessageToEventData(m.content) };
+      return { type: "tool_result", data: toolMessageToEventData(m.content), message_id: m.id };
     case "system":
-      return { type: "status", data: m.content };
+      return { type: "status", data: m.content, message_id: m.id };
     case "agent":
-      return { type: "assistant_message", data: m.content };
+      return { type: "assistant_message", data: m.content, message_id: m.id };
     default:
-      return { type: "text", data: m.content };
+      return { type: "text", data: m.content, message_id: m.id };
   }
 }
 
@@ -131,6 +131,7 @@ interface Store {
     additionalPromptPath?: string | null,
   ) => Promise<string>;
   sendMessage: (sessionId: string, content: string) => void;
+  retryMessage: (sessionId: string, messageId: string, content: string) => Promise<void>;
   resolveConfirm: (sessionId: string, callId: string, approved: boolean, message?: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
@@ -285,7 +286,10 @@ export const useStore = create<Store>((set, get) => {
     hydrateSessions: async () => {
       const remote = await api.sessions.list();
       set((s) => {
-        const next = { ...s.sessions };
+        const remoteIds = new Set(remote.map((session) => session.id));
+        const next = Object.fromEntries(
+          Object.entries(s.sessions).filter(([id]) => remoteIds.has(id)),
+        ) as Record<string, SessionEntry>;
         for (const session of remote) {
           const existing = next[session.id];
           if (existing) {
@@ -383,6 +387,7 @@ export const useStore = create<Store>((set, get) => {
                     created_at: "",
                     updated_at: "",
                     last_message_at: null,
+                    deleted_at: null,
                   },
                   events: [],
                   socket,
@@ -484,6 +489,35 @@ export const useStore = create<Store>((set, get) => {
           sessions: {
             ...s.sessions,
             [sessionId]: { ...entry, session: updated },
+          },
+        };
+      });
+    },
+
+    retryMessage: async (sessionId, messageId, content) => {
+      const entry = get().sessions[sessionId];
+      entry?.socket?.close();
+      await api.sessions.retryMessage(sessionId, messageId, content);
+      const [session, messages] = await Promise.all([
+        api.sessions.get(sessionId),
+        api.sessions.messages(sessionId),
+      ]);
+      const socket = attachSocket(sessionId);
+      const history = messages.map(messageToEvent);
+      set((s) => {
+        const cur = s.sessions[sessionId];
+        if (!cur) return s;
+        return {
+          sessions: {
+            ...s.sessions,
+            [sessionId]: {
+              ...cur,
+              session,
+              events: history,
+              socket,
+              generating: true,
+              pendingConfirms: [],
+            },
           },
         };
       });

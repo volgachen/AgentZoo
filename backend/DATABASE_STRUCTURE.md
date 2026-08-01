@@ -38,6 +38,7 @@ Live/past sessions; form a tree via `parent_session_id`.
 | `created_at` | DATETIME(3) | NOT NULL |
 | `updated_at` | DATETIME(3) | NOT NULL |
 | `last_message_at` | DATETIME(3) | nullable |
+| `deleted_at` | DATETIME(3) | nullable; NULL means visible, non-NULL means soft-deleted |
 
 Indexes: `idx_sessions_agent (agent_id)`, `idx_sessions_parent (parent_session_id)`.
 
@@ -52,6 +53,7 @@ Turn history.
 | `content` | LONGTEXT | NOT NULL |
 | `from_session_id` | VARCHAR(100) | nullable source id, for example another session id or `plugin:{instance_id}` |
 | `created_at` | DATETIME(3) | NOT NULL |
+| `deleted_at` | DATETIME(3) | nullable; NULL means visible, non-NULL means soft-deleted |
 
 Index: `idx_messages_session (session_id)`. FK: `session_id → sessions(id) ON DELETE CASCADE`.
 

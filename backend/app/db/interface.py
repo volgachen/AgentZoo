@@ -63,6 +63,9 @@ class IAgentDatabase(ABC):
     async def update_session_status(self, session_id: str, status: SessionStatus) -> Session: pass
 
     @abstractmethod
+    async def soft_delete_session(self, session_id: str) -> None: pass
+
+    @abstractmethod
     async def add_message(
         self,
         session_id: str,
@@ -74,6 +77,9 @@ class IAgentDatabase(ABC):
 
     @abstractmethod
     async def get_messages(self, session_id: str) -> List[Message]: pass
+
+    @abstractmethod
+    async def soft_delete_messages_from(self, session_id: str, message_id: str) -> Message: pass
 
     # ------- Plugin instances/runs/logs -------
     @abstractmethod
