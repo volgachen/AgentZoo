@@ -39,6 +39,11 @@ export interface AgentTemplate {
   created_at: string;
 }
 
+export type SessionCreateMode =
+  | "use_existing_directory"
+  | "duplicate_by_copy"
+  | "git_worktree";
+
 export interface Session {
   id: string;
   agent_id: string;

@@ -1,4 +1,5 @@
 import json
+import uuid
 import warnings
 from datetime import datetime, timezone
 from typing import Any
@@ -599,6 +600,7 @@ class MySqlDatabase(IAgentDatabase):
         agent_id: str,
         working_dir: str | None = None,
         *,
+        session_id: str | None = None,
         title: str | None = None,
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
@@ -606,6 +608,7 @@ class MySqlDatabase(IAgentDatabase):
     ) -> Session:
         agent = await self.get_agent(agent_id)
         session = Session(
+            id=session_id or str(uuid.uuid4()),
             agent_id=agent_id,
             title=title,
             working_dir=working_dir,

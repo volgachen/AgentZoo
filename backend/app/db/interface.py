@@ -43,6 +43,7 @@ class IAgentDatabase(ABC):
         agent_id: str,
         working_dir: str | None = None,
         *,
+        session_id: str | None = None,
         title: str | None = None,
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,

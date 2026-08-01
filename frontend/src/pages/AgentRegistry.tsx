@@ -11,19 +11,11 @@ const AGENT_TYPE_LABEL: Record<string, string> = {
   claude_code: "Claude Code",
 };
 
-interface DirSelection {
-  workingDir: string;
-  templateDir: string | null;
-  additionalPrompt: string | null;
-  additionalPromptPath: string | null;
-}
-
 export default function AgentRegistry() {
   const [agents, setAgents] = useState<AgentTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
-  const [dirs, setDirs] = useState<Record<string, DirSelection>>({});
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   // detail modal: undefined = closed, null = create, agent = edit
   const [editing, setEditing] = useState<AgentTemplate | null | undefined>(undefined);
@@ -53,26 +45,7 @@ export default function AgentRegistry() {
     }
   };
 
-  const handleLaunch = async (agentId: string) => {
-    setLaunching(agentId);
-    setLaunchError(null);
-    try {
-      const sel = dirs[agentId];
-      const sessionId = await launchSession(
-        agentId,
-        sel?.workingDir ?? null,
-        sel?.templateDir ?? null,
-        sel?.additionalPrompt ?? null,
-        sel?.additionalPromptPath ?? null,
-      );
-      setActive(sessionId);
-      navigate(`/console/${sessionId}`);
-    } catch (e) {
-      setLaunchError((e as Error).message);
-    } finally {
-      setLaunching(null);
-    }
-  };
+  const activeAgent = agents.find((agent) => agent.id === pickerFor) ?? null;
 
   if (loading) {
     return (
@@ -99,108 +72,77 @@ export default function AgentRegistry() {
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {agents.map((agent) => {
-          const sel = dirs[agent.id];
-          return (
-            <div
-              key={agent.id}
-              className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex flex-col gap-3"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <h2 className="text-lg font-medium text-white">{agent.name}</h2>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300 whitespace-nowrap">
-                  {AGENT_TYPE_LABEL[agent.agent_type] ?? agent.agent_type}
-                </span>
-              </div>
-              <p className="text-sm text-gray-400 flex-1">{agent.description}</p>
+        {agents.map((agent) => (
+          <div
+            key={agent.id}
+            className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex flex-col gap-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-lg font-medium text-white">{agent.name}</h2>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300 whitespace-nowrap">
+                {AGENT_TYPE_LABEL[agent.agent_type] ?? agent.agent_type}
+              </span>
+            </div>
+            <p className="text-sm text-gray-400 flex-1">{agent.description}</p>
 
-              <div className="flex items-center gap-3 text-xs">
-                <button
-                  onClick={() => setEditing(agent)}
-                  className="text-indigo-400 hover:text-indigo-300"
-                >
-                  Edit / Details
-                </button>
-                <button
-                  onClick={() => handleDelete(agent.id)}
-                  className="text-gray-500 hover:text-red-400"
-                >
-                  Delete
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPickerFor(agent.id)}
-                    className="px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-600 hover:border-indigo-500 text-sm text-gray-200"
-                  >
-                    {sel ? "Change directory…" : "Choose directory…"}
-                  </button>
-                  {sel && (
-                    <button
-                      onClick={() =>
-                        setDirs((d) => {
-                          const { [agent.id]: _, ...rest } = d;
-                          return rest;
-                        })
-                      }
-                      className="text-xs text-gray-500 hover:text-gray-300"
-                    >
-                      clear
-                    </button>
-                  )}
-                </div>
-                {sel && (
-                  <div className="text-xs font-mono text-gray-400 bg-gray-900/60 border border-gray-800 rounded px-2 py-1 space-y-0.5">
-                    {sel.templateDir ? (
-                      <>
-                        <div>
-                          <span className="text-gray-500">template:</span> {sel.templateDir}
-                        </div>
-                        <div>
-                          <span className="text-gray-500">→ target:</span> {sel.workingDir}
-                        </div>
-                      </>
-                    ) : (
-                      <div>
-                        <span className="text-gray-500">dir:</span> {sel.workingDir}
-                      </div>
-                    )}
-                    {sel.additionalPrompt && (
-                      <div>
-                        <span className="text-gray-500">+prompt:</span>{" "}
-                        {sel.additionalPrompt.length} char(s)
-                      </div>
-                    )}
-                    {sel.additionalPromptPath && (
-                      <div>
-                        <span className="text-gray-500">+prompt file:</span>{" "}
-                        {sel.additionalPromptPath}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
+            <div className="flex items-center gap-3 text-xs">
               <button
-                onClick={() => handleLaunch(agent.id)}
-                disabled={launching === agent.id}
-                className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                onClick={() => setEditing(agent)}
+                className="text-indigo-400 hover:text-indigo-300"
               >
-                {launching === agent.id ? "Launching..." : "Launch"}
+                Edit / Details
+              </button>
+              <button
+                onClick={() => handleDelete(agent.id)}
+                className="text-gray-500 hover:text-red-400"
+              >
+                Delete
               </button>
             </div>
-          );
-        })}
+
+            <button
+              onClick={() => {
+                setLaunchError(null);
+                setPickerFor(agent.id);
+              }}
+              disabled={launching === agent.id}
+              className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              {launching === agent.id ? "Launching..." : "Launch"}
+            </button>
+          </div>
+        ))}
       </div>
 
       <WorkingDirPicker
         open={pickerFor !== null}
-        onClose={() => setPickerFor(null)}
-        onConfirm={(value) => {
-          if (pickerFor) setDirs((d) => ({ ...d, [pickerFor]: value }));
-          setPickerFor(null);
+        launching={launching === pickerFor}
+        agentName={activeAgent?.name}
+        onClose={() => {
+          if (!launching) setPickerFor(null);
+        }}
+        onConfirm={async (value) => {
+          if (!pickerFor) return;
+          const agentId = pickerFor;
+          setLaunching(agentId);
+          setLaunchError(null);
+          try {
+            const sessionId = await launchSession(
+              agentId,
+              value.sourceDir,
+              value.createMode,
+              value.sessionName,
+              value.additionalPrompt,
+              value.additionalPromptPath,
+            );
+            setPickerFor(null);
+            setActive(sessionId);
+            navigate(`/console/${sessionId}`);
+          } catch (e) {
+            setLaunchError((e as Error).message);
+          } finally {
+            setLaunching(null);
+          }
         }}
       />
 

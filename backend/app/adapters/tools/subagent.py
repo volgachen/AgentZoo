@@ -111,10 +111,14 @@ class SubagentTool(BaseTool):
         branch: str | None = None
         if isolation == "worktree":
             work_dir, branch = await self._make_worktree(parent_dir)
-            body["working_dir"] = work_dir
+            body["source_dir"] = work_dir
+            body["create_mode"] = "use_existing_directory"
             logger.info(
                 "worktree isolation: work_dir=%s branch=%s", work_dir, branch
             )
+        elif parent_dir:
+            body["source_dir"] = parent_dir
+            body["create_mode"] = "use_existing_directory"
 
         label = description or f"subagent:{agent_id}"
         # Persist the task description as the session's title so spawned

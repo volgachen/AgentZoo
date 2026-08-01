@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from app.config import get_settings
 
 logger = logging.getLogger("augentia.fs")
 router = APIRouter(prefix="/fs", tags=["fs"])
@@ -100,4 +101,5 @@ async def home():
         "home": str(_HOME),
         "project_root": str(_REPO_ROOT),
         "templates_root": str(_TEMPLATES_ROOT),
+        "worktree_root": str(Path(get_settings().worktree_root).expanduser().resolve()),
     }

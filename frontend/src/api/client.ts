@@ -2,6 +2,7 @@ import type {
   AgentTemplate,
   AgentType,
   Session,
+  SessionCreateMode,
   Message,
   PluginDefinition,
   PluginInstance,
@@ -96,15 +97,22 @@ export const api = {
   sessions: {
     create: (
       agent_id: string,
-      working_dir: string | null = null,
-      template_dir: string | null = null,
+      source_dir: string | null,
+      create_mode: SessionCreateMode = "use_existing_directory",
+      title: string | null = null,
       additional_prompt: string | null = null,
       additional_prompt_path: string | null = null,
-      title: string | null = null,
     ) =>
       request<Session>("/sessions", {
         method: "POST",
-        body: JSON.stringify({ agent_id, working_dir, template_dir, additional_prompt, additional_prompt_path, title }),
+        body: JSON.stringify({
+          agent_id,
+          source_dir,
+          create_mode,
+          title,
+          additional_prompt,
+          additional_prompt_path,
+        }),
       }),
     updateTitle: (id: string, title: string) =>
       request<Session>(`/sessions/${id}`, {
