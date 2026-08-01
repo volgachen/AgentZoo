@@ -93,12 +93,10 @@ function toOneLine(s: string, max = 200): string {
 function buildConsoleItems(events: StreamEvent[]): ConsoleItem[] {
   const items: ConsoleItem[] = [];
   const toolCallsById = new Map<string, ToolCallView>();
-  const unresolvedToolResults: Array<{ name?: string; result: unknown }> = [];
-
-  const attachResult = (callId: string | undefined, name: string | undefined, result: unknown) => {
+  const attachResult = (callId: string | undefined, name: string | undefined, result: unknown): boolean => {
     if (callId && toolCallsById.has(callId)) {
       toolCallsById.get(callId)!.result = result;
-      return;
+      return true;
     }
 
     const reversedCalls = [...items]
@@ -109,9 +107,10 @@ function buildConsoleItems(events: StreamEvent[]): ConsoleItem[] {
     );
     if (fallback) {
       fallback.result = result;
-    } else {
-      unresolvedToolResults.push({ name, result });
+      return true;
     }
+
+    return false;
   };
 
   for (const event of events) {
@@ -164,22 +163,18 @@ function buildConsoleItems(events: StreamEvent[]): ConsoleItem[] {
 
     if (event.type === "tool_result") {
       const obj = parseJsonObject(event.data);
-      attachResult(
+      const attached = attachResult(
         typeof obj?.call_id === "string" ? obj.call_id : undefined,
         typeof obj?.name === "string" ? obj.name : undefined,
         obj?.result ?? obj?.content ?? event.data,
       );
+      if (!attached) {
+        items.push(event);
+      }
       continue;
     }
 
     items.push(event);
-  }
-
-  for (const result of unresolvedToolResults) {
-    items.push({
-      type: "tool_result",
-      data: resultToText(result.name ? `${result.name} → ${result.result}` : result.result),
-    });
   }
 
   return items;

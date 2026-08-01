@@ -86,7 +86,8 @@ function toolMessageToEventData(content: string): string {
       }
       if (obj.role === "tool") {
         return JSON.stringify({
-          name: obj.tool_call_id ? `tool ${obj.tool_call_id}` : "tool",
+          call_id: typeof obj.tool_call_id === "string" ? obj.tool_call_id : undefined,
+          name: "tool",
           result: obj.content ?? "",
         });
       }
