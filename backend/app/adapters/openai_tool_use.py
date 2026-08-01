@@ -299,7 +299,7 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
 
                 yield StreamEvent(
                     type=StreamEventType.TOOL_CALL,
-                    data=json.dumps({"name": fn_name, "args": fn_args}),
+                    data=json.dumps({"call_id": tc.id, "name": fn_name, "args": fn_args}),
                 )
 
                 # Human-in-the-loop gate: any tool not on the auto-approve list
@@ -362,7 +362,7 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                 )
                 yield StreamEvent(
                     type=StreamEventType.TOOL_RESULT,
-                    data=json.dumps({"name": fn_name, "result": result_view}),
+                    data=json.dumps({"call_id": tc.id, "name": fn_name, "result": result_view}),
                 )
 
                 # If a supplementary message was provided, append it as a user message

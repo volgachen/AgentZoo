@@ -5,6 +5,7 @@ import type { StreamEvent } from "../api/types";
 import TaskListPanel from "../components/TaskListPanel";
 import SubAgentListPanel from "../components/SubAgentListPanel";
 import ToolConfirmPanel from "../components/ToolConfirmPanel";
+import ToolPreview from "../components/ToolPreview";
 
 const EVENT_STYLE: Record<string, string> = {
   text: "text-gray-200",
@@ -34,6 +35,16 @@ interface AssistantPayload {
   tool_calls?: AssistantToolCall[] | null;
 }
 
+interface ToolCallView {
+  kind: "tool_call";
+  callId: string;
+  name: string;
+  args: unknown;
+  result?: unknown;
+}
+
+type ConsoleItem = StreamEvent | ToolCallView;
+
 function parseAssistantData(raw: string): AssistantPayload {
   try {
     const obj = JSON.parse(raw);
@@ -55,110 +66,154 @@ function parseToolArguments(raw: string | undefined): unknown {
   }
 }
 
-// Build a one-line summary + a fully-formatted block for tool events. The raw
-// payload is JSON: tool_call = {name,args}, tool_result = {name,result}.
-function formatToolData(
-  type: string,
-  raw: string,
-): { summary: string; full: string } {
+function parseJsonObject(raw: string): Record<string, unknown> | null {
   try {
     const obj = JSON.parse(raw);
-    if (type === "tool_call" || type === "tool_confirm") {
-      const args = obj.args ?? {};
-      const argsLine = JSON.stringify(args);
-      const argsBlock = JSON.stringify(args, null, 2);
-      return {
-        summary: `${obj.name}(${argsLine})`,
-        full: `${obj.name}(\n${argsBlock}\n)`,
-      };
-    }
-    if (type === "tool_result") {
-      const name = obj.name ?? obj.tool_call_id ?? "tool";
-      const result = obj.result ?? obj.content ?? "";
-      const resultLine =
-        typeof result === "string" ? result : JSON.stringify(result);
-      const resultBlock =
-        typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      return {
-        summary: `${name} → ${resultLine}`,
-        full: `${name} →\n${resultBlock}`,
-      };
-    }
+    return obj && typeof obj === "object" ? (obj as Record<string, unknown>) : null;
   } catch {
-    // fall through to raw
+    return null;
   }
-  return { summary: raw, full: raw };
 }
 
-// Collapse multi-line text to a single line with a visible ↵ marker so the user
-// can tell something was truncated.
+function resultToText(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (result === undefined) return "";
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
+}
+
 function toOneLine(s: string, max = 200): string {
   const flat = s.replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max) + "…" : flat;
 }
 
-function ToolEventLine({ event }: { event: StreamEvent }) {
+function buildConsoleItems(events: StreamEvent[]): ConsoleItem[] {
+  const items: ConsoleItem[] = [];
+  const toolCallsById = new Map<string, ToolCallView>();
+  const unresolvedToolResults: Array<{ name?: string; result: unknown }> = [];
+
+  const attachResult = (callId: string | undefined, name: string | undefined, result: unknown) => {
+    if (callId && toolCallsById.has(callId)) {
+      toolCallsById.get(callId)!.result = result;
+      return;
+    }
+
+    const reversedCalls = [...items]
+      .filter((item): item is ToolCallView => "kind" in item && item.kind === "tool_call")
+      .reverse();
+    const fallback = reversedCalls.find(
+      (item) => item.result === undefined && (!name || item.name === name),
+    );
+    if (fallback) {
+      fallback.result = result;
+    } else {
+      unresolvedToolResults.push({ name, result });
+    }
+  };
+
+  for (const event of events) {
+    if (event.type === "assistant_message") {
+      const payload = parseAssistantData(event.data);
+      const content = payload.content ?? "";
+      if (content) {
+        items.push({ type: "assistant_message", data: content });
+      }
+      for (const [index, toolCall] of (payload.tool_calls ?? []).entries()) {
+        const name = toolCall.function?.name ?? "unknown";
+        const callId = toolCall.id ?? `${items.length}:tool:${index}`;
+        const item: ToolCallView = {
+          kind: "tool_call",
+          callId,
+          name,
+          args: parseToolArguments(toolCall.function?.arguments),
+        };
+        items.push(item);
+        toolCallsById.set(callId, item);
+      }
+      continue;
+    }
+
+    if (event.type === "tool_call" || event.type === "tool_confirm") {
+      const obj = parseJsonObject(event.data);
+      const name = typeof obj?.name === "string" ? obj.name : "tool";
+      const callId =
+        typeof obj?.call_id === "string"
+          ? obj.call_id
+          : typeof obj?.id === "string"
+            ? obj.id
+            : `${items.length}:tool`;
+      const existing = toolCallsById.get(callId);
+      if (existing) {
+        existing.name = name;
+        existing.args = obj?.args ?? existing.args;
+      } else {
+        const item: ToolCallView = {
+          kind: "tool_call",
+          callId,
+          name,
+          args: obj?.args ?? {},
+        };
+        items.push(item);
+        toolCallsById.set(callId, item);
+      }
+      continue;
+    }
+
+    if (event.type === "tool_result") {
+      const obj = parseJsonObject(event.data);
+      attachResult(
+        typeof obj?.call_id === "string" ? obj.call_id : undefined,
+        typeof obj?.name === "string" ? obj.name : undefined,
+        obj?.result ?? obj?.content ?? event.data,
+      );
+      continue;
+    }
+
+    items.push(event);
+  }
+
+  for (const result of unresolvedToolResults) {
+    items.push({
+      type: "tool_result",
+      data: resultToText(result.name ? `${result.name} → ${result.result}` : result.result),
+    });
+  }
+
+  return items;
+}
+
+function ToolCallLine({ item }: { item: ToolCallView }) {
   const [expanded, setExpanded] = useState(false);
-  const style = EVENT_STYLE[event.type] ?? "text-gray-300";
-  const prefix =
-    event.type === "tool_call" ? "⚙ " : event.type === "tool_confirm" ? "⚠ " : "↩ ";
-  const { summary, full } = formatToolData(event.type, event.data);
-  const oneLine = toOneLine(summary);
-  const chevron = expanded ? "▾" : "▸";
   return (
-    <div className={`text-left font-mono text-sm ${style}`}>
+    <div className="text-left font-mono text-sm text-yellow-400">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="w-full text-left flex items-start gap-1 hover:bg-gray-800/40 rounded px-1 -mx-1 cursor-pointer"
         title={expanded ? "Collapse" : "Expand"}
       >
-        <span className="text-gray-500 select-none">{chevron}</span>
-        <span className="flex-1 truncate">
-          {prefix}
-          {oneLine}
-        </span>
+        <span className="text-gray-500 select-none">{expanded ? "▾" : "▸"}</span>
+        <span className="shrink-0">⚙ {item.name}</span>
+        <span className="text-gray-500 truncate">{item.callId}</span>
       </button>
       {expanded && (
-        <pre className="mt-1 ml-4 px-2 py-1.5 bg-gray-950/60 border border-gray-800 rounded whitespace-pre-wrap break-all text-xs text-gray-300">
-          {full}
+        <div className="ml-4">
+          <ToolPreview name={item.name} args={item.args} className="mt-1" />
+        </div>
+      )}
+      {item.result !== undefined && (
+        <pre className="mt-1 ml-4 px-2 py-1.5 bg-gray-950/60 border border-gray-800 rounded whitespace-pre-wrap break-all text-xs text-amber-200 overflow-auto max-h-72">
+          {resultToText(item.result)}
         </pre>
       )}
     </div>
   );
 }
 
-function AssistantMessageLine({ event }: { event: StreamEvent }) {
-  const payload = parseAssistantData(event.data);
-  const content = payload.content ?? "";
-  const toolCalls = payload.tool_calls ?? [];
-  return (
-    <div className="text-left font-mono text-sm text-gray-200 whitespace-pre-wrap break-all">
-      {content && <div>{content}</div>}
-      {toolCalls.map((toolCall, index) => {
-        const name = toolCall.function?.name ?? "unknown";
-        const args = parseToolArguments(toolCall.function?.arguments);
-        const toolEvent: StreamEvent = {
-          type: "tool_call",
-          data: JSON.stringify({ name, args }),
-        };
-        return <ToolEventLine key={toolCall.id ?? index} event={toolEvent} />;
-      })}
-    </div>
-  );
-}
-
 function EventLine({ event }: { event: StreamEvent }) {
-  if (event.type === "assistant_message") {
-    return <AssistantMessageLine event={event} />;
-  }
-  if (
-    event.type === "tool_call" ||
-    event.type === "tool_confirm" ||
-    event.type === "tool_result"
-  ) {
-    return <ToolEventLine event={event} />;
-  }
   const style = EVENT_STYLE[event.type] ?? "text-gray-300";
   const prefix =
     event.type === "status"
@@ -175,9 +230,20 @@ function EventLine({ event }: { event: StreamEvent }) {
   return (
     <div className={`text-left font-mono text-sm whitespace-pre-wrap break-all ${style}`}>
       {prefix}
-      {body}
+      {event.type === "tool_result" ? toOneLine(body) : body}
     </div>
   );
+}
+
+function isToolCallView(item: ConsoleItem): item is ToolCallView {
+  return "kind" in item && item.kind === "tool_call";
+}
+
+function ConsoleItemLine({ item }: { item: ConsoleItem }) {
+  if (isToolCallView(item)) {
+    return <ToolCallLine item={item} />;
+  }
+  return <EventLine event={item} />;
 }
 
 export default function LiveConsole() {
@@ -248,6 +314,7 @@ export default function LiveConsole() {
 
   const { session, events } = entry;
   const generating = entry.generating;
+  const consoleItems = buildConsoleItems(events);
 
   const handleSend = () => {
     const msg = input.trim();
@@ -310,11 +377,11 @@ export default function LiveConsole() {
       <div className="flex-1 flex gap-3 min-h-0">
         {/* Event log */}
         <div className="flex-1 bg-gray-900 rounded-xl border border-gray-700 p-4 overflow-y-auto flex flex-col gap-1 min-h-0">
-          {events.length === 0 && (
+          {consoleItems.length === 0 && (
             <p className="text-gray-600 text-sm font-mono">Waiting for output…</p>
           )}
-          {events.map((ev, i) => (
-            <EventLine key={i} event={ev} />
+          {consoleItems.map((item, i) => (
+            <ConsoleItemLine key={i} item={item} />
           ))}
           {generating && (
             <div className="flex items-center gap-2 font-mono text-sm text-indigo-300">

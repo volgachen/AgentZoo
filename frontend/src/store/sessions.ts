@@ -188,14 +188,16 @@ export const useStore = create<Store>((set, get) => {
           nextSession.status,
         );
 
-        // A tool_confirm frame carries {call_id,name,args}: surface it in the
-        // log AND enqueue an interactive approve/deny card.
+        // A tool_confirm frame carries {call_id,name,args}: enqueue an
+        // interactive approve/deny card without adding an extra session log row.
         let pendingConfirms = entry.pendingConfirms;
+        let shouldAppendEvent = true;
         if (frame.type === "tool_confirm") {
           try {
             const obj = JSON.parse(frame.data);
             const confirm = { call_id: obj.call_id, name: obj.name, args: obj.args };
             pendingConfirms = [...pendingConfirms, confirm];
+            shouldAppendEvent = false;
             if (!isCurrent && confirm.call_id) {
               notifyWaitingConfirm(nextSession, confirm);
             }
@@ -229,7 +231,9 @@ export const useStore = create<Store>((set, get) => {
             [sessionId]: {
               ...entry,
               session: nextSession,
-              events: [...entry.events, frame as StreamEvent],
+              events: shouldAppendEvent
+                ? [...entry.events, frame as StreamEvent]
+                : entry.events,
               pendingConfirms,
               attentionUnread: isCurrent
                 ? false
