@@ -18,9 +18,27 @@
 
 ### 1. 准备数据库服务
 
-AI 助理需要数据库来保存会话记录和状态信息。如果你已经有可用的 SQL 数据库服务，可以直接在 `backend/.env` 中配置连接信息。
+AI 助理需要数据库来保存会话记录和状态信息。本地开发或试用时，推荐使用项目内置的 SQLite 持久化后端。SQLite 通过 Python 标准库工作，不需要安装和启动 MySQL、MariaDB 等额外数据库服务，数据会保存到本地文件。
 
-如果只是本地测试，也可以使用项目提供的简易数据库后端。
+在 `backend/.env` 中使用：
+
+```dotenv
+DB_TYPE="sqlite"
+SQLITE_PATH="backend/.local/augentia.db"
+```
+
+如果你已经有可用的 MySQL 服务，也可以继续在 `backend/.env` 中配置 MySQL 连接信息：
+
+```dotenv
+DB_TYPE="mysql"
+MYSQL_HOST="127.0.0.1"
+MYSQL_PORT="3306"
+MYSQL_USER="root"
+MYSQL_PASSWORD=""
+MYSQL_DATABASE="augentia"
+```
+
+项目也保留了一个可选的本机 MySQL/MariaDB 管理脚本：`python scripts/local_mysql.py start`。不过它仍然要求电脑上已经安装 MySQL 或 MariaDB 服务端程序，所以普通本地试用优先使用 SQLite 即可。临时测试还可以把 `DB_TYPE` 改成 `mock`，但这种内存数据库不会持久保存数据。
 
 ### 2. 安装浏览器插件
 
