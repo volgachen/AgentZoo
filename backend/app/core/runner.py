@@ -163,7 +163,7 @@ class SessionRunner:
     async def _run_turn(self, item: _InboxItem) -> None:
         # Persist the raw content + sender separately; the agent stdin gets a
         # prefixed view so it can route its reply.
-        await self._db.add_message(
+        user_message = await self._db.add_message(
             self._session_id,
             MessageRole.USER,
             item.content,
@@ -174,7 +174,7 @@ class SessionRunner:
             if item.from_session_id
             else item.content
         )
-        self._broadcast(StreamEvent(type=StreamEventType.USER, data=delivered))
+        self._broadcast(StreamEvent(type=StreamEventType.USER, data=delivered, message_id=user_message.id))
 
         self._generating = True
         agent_buf: list[str] = []
@@ -206,15 +206,17 @@ class SessionRunner:
                     )
                 if event.type == StreamEventType.ASSISTANT_MESSAGE:
                     saw_native_messages = True
-                    await self._db.add_message(
+                    message = await self._db.add_message(
                         self._session_id, MessageRole.AGENT, event.data
                     )
+                    event.message_id = message.id
                     agent_buf.clear()
                 elif event.type == StreamEventType.TOOL_MESSAGE:
                     saw_native_messages = True
-                    await self._db.add_message(
+                    message = await self._db.add_message(
                         self._session_id, MessageRole.TOOL, event.data
                     )
+                    event.message_id = message.id
                 elif event.type == StreamEventType.TEXT:
                     if saw_native_messages:
                         should_broadcast = False
@@ -224,14 +226,16 @@ class SessionRunner:
                     if saw_native_messages:
                         should_broadcast = False
                     else:
-                        await self._db.add_message(
+                        message = await self._db.add_message(
                             self._session_id, MessageRole.TOOL_CALL, event.data
                         )
+                        event.message_id = message.id
                 elif event.type == StreamEventType.TOOL_RESULT:
                     if not saw_native_messages:
-                        await self._db.add_message(
+                        message = await self._db.add_message(
                             self._session_id, MessageRole.TOOL, event.data
                         )
+                        event.message_id = message.id
                 elif event.type == StreamEventType.ERROR:
                     errored = True
                 if should_broadcast:

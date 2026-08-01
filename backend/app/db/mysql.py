@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at        DATETIME(3)   NOT NULL,
     updated_at        DATETIME(3)   NOT NULL,
     last_message_at   DATETIME(3)   DEFAULT NULL,
+    deleted_at        DATETIME(3)   DEFAULT NULL,
     INDEX idx_sessions_agent (agent_id),
     INDEX idx_sessions_parent (parent_session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content          LONGTEXT     NOT NULL,
     from_session_id  VARCHAR(100) DEFAULT NULL,
     created_at       DATETIME(3)  NOT NULL,
+    deleted_at       DATETIME(3)  DEFAULT NULL,
     INDEX idx_messages_session (session_id),
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
@@ -172,6 +174,16 @@ _COLUMN_MIGRATIONS: list[tuple[str, str, list[str]]] = [
                    WHERE m.session_id = s.id
                )""",
         ],
+    ),
+    (
+        "sessions",
+        "deleted_at",
+        ["ALTER TABLE sessions ADD COLUMN deleted_at DATETIME(3) DEFAULT NULL AFTER last_message_at"],
+    ),
+    (
+        "messages",
+        "deleted_at",
+        ["ALTER TABLE messages ADD COLUMN deleted_at DATETIME(3) DEFAULT NULL AFTER created_at"],
     ),
 ]
 
@@ -312,6 +324,7 @@ def _row_to_session(row: dict[str, Any]) -> Session:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         last_message_at=row.get("last_message_at"),
+        deleted_at=row.get("deleted_at"),
     )
 
 
@@ -323,6 +336,7 @@ def _row_to_message(row: dict[str, Any]) -> Message:
         content=row["content"],
         from_session_id=row["from_session_id"],
         created_at=row["created_at"],
+        deleted_at=row.get("deleted_at"),
     )
 
 
@@ -658,7 +672,7 @@ class MySqlDatabase(IAgentDatabase):
         async with self._pool.acquire() as conn:
             async with conn.cursor(DictCursor) as cur:
                 await cur.execute(
-                    "SELECT * FROM sessions WHERE id = %s", (session_id,)
+                    "SELECT * FROM sessions WHERE id = %s AND deleted_at IS NULL", (session_id,)
                 )
                 row = await cur.fetchone()
         if row is None:
@@ -668,7 +682,7 @@ class MySqlDatabase(IAgentDatabase):
     async def list_sessions(self) -> list[Session]:
         async with self._pool.acquire() as conn:
             async with conn.cursor(DictCursor) as cur:
-                await cur.execute("SELECT * FROM sessions ORDER BY created_at")
+                await cur.execute("SELECT * FROM sessions WHERE deleted_at IS NULL ORDER BY created_at")
                 rows = await cur.fetchall()
         return [_row_to_session(r) for r in rows]
 
@@ -686,6 +700,23 @@ class MySqlDatabase(IAgentDatabase):
         if result == 0:
             raise KeyError(f"Session '{session_id}' not found")
         return await self.get_session(session_id)
+
+    async def soft_delete_session(self, session_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                result = await cur.execute(
+                    """UPDATE sessions SET deleted_at = %s, updated_at = %s
+                       WHERE id = %s AND deleted_at IS NULL""",
+                    (now, now, session_id),
+                )
+                if result == 0:
+                    raise KeyError(f"Session '{session_id}' not found")
+                await cur.execute(
+                    """UPDATE messages SET deleted_at = %s
+                       WHERE session_id = %s AND deleted_at IS NULL""",
+                    (now, session_id),
+                )
 
     # ---- Messages ----
 
@@ -739,11 +770,44 @@ class MySqlDatabase(IAgentDatabase):
         async with self._pool.acquire() as conn:
             async with conn.cursor(DictCursor) as cur:
                 await cur.execute(
-                    "SELECT * FROM messages WHERE session_id = %s ORDER BY created_at",
+                    """SELECT * FROM messages
+                       WHERE session_id = %s AND deleted_at IS NULL
+                       ORDER BY created_at""",
                     (session_id,),
                 )
                 rows = await cur.fetchall()
         return [_row_to_message(r) for r in rows]
+
+    async def soft_delete_messages_from(self, session_id: str, message_id: str) -> Message:
+        await self.get_session(session_id)
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cur:
+                await cur.execute(
+                    """SELECT * FROM messages
+                       WHERE session_id = %s AND id = %s AND deleted_at IS NULL""",
+                    (session_id, message_id),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    raise KeyError(f"Message '{message_id}' not found")
+                target = _row_to_message(row)
+
+            now = datetime.now(timezone.utc)
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """UPDATE messages SET deleted_at = %s
+                       WHERE session_id = %s AND deleted_at IS NULL
+                         AND created_at >= %s""",
+                    (now, session_id, target.created_at),
+                )
+                await cur.execute(
+                    """UPDATE sessions s SET last_message_at = (
+                           SELECT MAX(m.created_at) FROM messages m
+                           WHERE m.session_id = s.id AND m.deleted_at IS NULL
+                       ) WHERE s.id = %s""",
+                    (session_id,),
+                )
+        return target
 
     # ---- Plugin instances/runs/logs ----
 

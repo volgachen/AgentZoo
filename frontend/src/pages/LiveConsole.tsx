@@ -148,7 +148,25 @@ function AssistantMessageLine({ event }: { event: StreamEvent }) {
   );
 }
 
-function EventLine({ event }: { event: StreamEvent }) {
+function EventLine({
+  event,
+  editing,
+  editValue,
+  generating,
+  onStartEdit,
+  onEditChange,
+  onCancelEdit,
+  onSubmitEdit,
+}: {
+  event: StreamEvent;
+  editing: boolean;
+  editValue: string;
+  generating: boolean;
+  onStartEdit: () => void;
+  onEditChange: (value: string) => void;
+  onCancelEdit: () => void;
+  onSubmitEdit: () => void;
+}) {
   if (event.type === "assistant_message") {
     return <AssistantMessageLine event={event} />;
   }
@@ -172,8 +190,45 @@ function EventLine({ event }: { event: StreamEvent }) {
             : "";
   const body =
     typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+  if (event.type === "user" && editing) {
+    return (
+      <div className="flex flex-col gap-2 rounded-lg border border-indigo-700 bg-indigo-950/30 p-2">
+        <textarea
+          className="w-full bg-gray-950 border border-indigo-600 rounded px-2 py-1.5 text-sm text-indigo-100 font-mono resize-y focus:outline-none focus:border-indigo-400"
+          rows={Math.max(2, editValue.split("\n").length)}
+          value={editValue}
+          onChange={(e) => onEditChange(e.target.value)}
+          disabled={generating}
+          autoFocus
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancelEdit}
+            className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-200"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSubmitEdit}
+            disabled={!editValue.trim() || generating || !event.message_id}
+            className="px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs text-white"
+          >
+            Send from here
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className={`text-left font-mono text-sm whitespace-pre-wrap break-all ${style}`}>
+    <div
+      className={`text-left font-mono text-sm whitespace-pre-wrap break-all ${style} ${
+        event.type === "user" && event.message_id ? "cursor-text hover:bg-indigo-950/30 rounded px-1 -mx-1" : ""
+      }`}
+      onDoubleClick={event.type === "user" && event.message_id ? onStartEdit : undefined}
+      title={event.type === "user" && event.message_id ? "Double-click to edit and resend from here" : undefined}
+    >
       {prefix}
       {body}
     </div>
@@ -185,11 +240,14 @@ export default function LiveConsole() {
   const navigate = useNavigate();
   const sessions = useStore((s) => s.sessions);
   const sendMessage = useStore((s) => s.sendMessage);
+  const retryMessage = useStore((s) => s.retryMessage);
   const resolveConfirm = useStore((s) => s.resolveConfirm);
   const openSession = useStore((s) => s.openSession);
   const fetchTasks = useStore((s) => s.fetchTasks);
   const hydrateSessions = useStore((s) => s.hydrateSessions);
   const [input, setInput] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const entry = sessionId ? sessions[sessionId] : undefined;
@@ -256,6 +314,14 @@ export default function LiveConsole() {
     setInput("");
   };
 
+  const handleRetrySend = async () => {
+    const msg = editingContent.trim();
+    if (!msg || !sessionId || !editingMessageId || generating) return;
+    await retryMessage(sessionId, editingMessageId, msg);
+    setEditingMessageId(null);
+    setEditingContent("");
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -314,7 +380,24 @@ export default function LiveConsole() {
             <p className="text-gray-600 text-sm font-mono">Waiting for output…</p>
           )}
           {events.map((ev, i) => (
-            <EventLine key={i} event={ev} />
+            <EventLine
+              key={ev.message_id ?? i}
+              event={ev}
+              editing={!!ev.message_id && editingMessageId === ev.message_id}
+              editValue={editingContent}
+              generating={generating}
+              onStartEdit={() => {
+                if (generating || ev.type !== "user" || !ev.message_id) return;
+                setEditingMessageId(ev.message_id);
+                setEditingContent(String(ev.data ?? ""));
+              }}
+              onEditChange={setEditingContent}
+              onCancelEdit={() => {
+                setEditingMessageId(null);
+                setEditingContent("");
+              }}
+              onSubmitEdit={handleRetrySend}
+            />
           ))}
           {generating && (
             <div className="flex items-center gap-2 font-mono text-sm text-indigo-300">

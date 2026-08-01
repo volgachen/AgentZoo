@@ -114,6 +114,11 @@ export const api = {
     get: (id: string) => request<Session>(`/sessions/${id}`),
     list: () => request<Session[]>("/sessions"),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),
+    retryMessage: (id: string, messageId: string, content: string) =>
+      request<{ status: string }>(`/sessions/${id}/messages/${messageId}/retry`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      }),
     tasks: (id: string) => request<Task[]>(`/sessions/${id}/tasks`),
     delete: (id: string) =>
       request<void>(`/sessions/${id}`, { method: "DELETE" }),

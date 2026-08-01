@@ -52,6 +52,7 @@ export interface Session {
   updated_at: string;
   // created_at of the newest message; null for a session with no messages yet.
   last_message_at: string | null;
+  deleted_at: string | null;
 }
 
 export interface Message {
@@ -59,12 +60,15 @@ export interface Message {
   session_id: string;
   role: MessageRole;
   content: string;
+  from_session_id: string | null;
   created_at: string;
+  deleted_at: string | null;
 }
 
 export interface StreamEvent {
   type: StreamEventType;
   data: string;
+  message_id?: string;
 }
 
 export type TaskStatus = "pending" | "in_progress" | "completed";

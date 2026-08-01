@@ -77,6 +77,7 @@ class Session(BaseModel):
     # messages. Maintained on every add_message (a stored column, not derived on
     # read) so the dashboard can sort on it without joining the messages table.
     last_message_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
 
 class Message(BaseModel):
@@ -86,6 +87,7 @@ class Message(BaseModel):
     content: str
     from_session_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    deleted_at: Optional[datetime] = None
 
 
 class TaskStatus(str, Enum):

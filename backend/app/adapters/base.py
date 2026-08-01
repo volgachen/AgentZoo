@@ -34,6 +34,7 @@ class StreamEventType(str, Enum):
 class StreamEvent(BaseModel):
     type: StreamEventType
     data: str
+    message_id: str | None = None
 
 
 class BaseAgentAdapter(ABC):

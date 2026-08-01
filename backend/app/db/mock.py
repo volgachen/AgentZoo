@@ -156,7 +156,7 @@ class MockMemoryDatabase(IAgentDatabase):
 
     async def get_session(self, session_id: str) -> Session:
         session = self._sessions.get(session_id)
-        if session is None:
+        if session is None or session.deleted_at is not None:
             raise KeyError(f"Session '{session_id}' not found")
         return session
 
@@ -167,13 +167,22 @@ class MockMemoryDatabase(IAgentDatabase):
         return session
 
     async def list_sessions(self) -> List[Session]:
-        return list(self._sessions.values())
+        return [s for s in self._sessions.values() if s.deleted_at is None]
 
     async def update_session_status(self, session_id: str, status: SessionStatus) -> Session:
         session = await self.get_session(session_id)
         session.status = status
         session.updated_at = datetime.now(timezone.utc)
         return session
+
+    async def soft_delete_session(self, session_id: str) -> None:
+        session = await self.get_session(session_id)
+        now = datetime.now(timezone.utc)
+        session.deleted_at = now
+        session.updated_at = now
+        for message in self._messages.get(session_id, []):
+            if message.deleted_at is None:
+                message.deleted_at = now
 
     async def add_message(
         self,
@@ -201,7 +210,21 @@ class MockMemoryDatabase(IAgentDatabase):
 
     async def get_messages(self, session_id: str) -> List[Message]:
         await self.get_session(session_id)
-        return list(self._messages[session_id])
+        return [m for m in self._messages[session_id] if m.deleted_at is None]
+
+    async def soft_delete_messages_from(self, session_id: str, message_id: str) -> Message:
+        await self.get_session(session_id)
+        messages = self._messages[session_id]
+        target = next((m for m in messages if m.id == message_id and m.deleted_at is None), None)
+        if target is None:
+            raise KeyError(f"Message '{message_id}' not found")
+        now = datetime.now(timezone.utc)
+        for message in messages:
+            if message.deleted_at is None and message.created_at >= target.created_at:
+                message.deleted_at = now
+        visible = [m for m in messages if m.deleted_at is None]
+        self._sessions[session_id].last_message_at = visible[-1].created_at if visible else None
+        return target
 
     # ------- Plugin instances/runs/logs -------
 
