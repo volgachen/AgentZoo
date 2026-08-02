@@ -2,9 +2,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, List
 from app.db.interface import IAgentDatabase, _UNSET
-from app.db.seed_browser import browser_agent_template as _browser_agent
+from app.db.seed_agents import seed_agent_templates
 from app.models.domain import (
-    AgentTemplate, AgentType, Session, SessionStatus,
+    AgentTemplate, Session, SessionStatus,
     Message, MessageRole,
     PluginInstance, PluginLog, PluginRun, PluginStatus,
     Task, TaskStatus,
@@ -12,67 +12,10 @@ from app.models.domain import (
 from app.plugins.events import PluginEvent, get_plugin_event_bus
 
 
-_SEED_AGENTS = [
-    AgentTemplate(
-        id="agent-research-001",
-        name="Research Agent",
-        description="通过网络搜索、论文检索、网页抓取等工具搜集资料，整理为结构化研究报告。",
-        agent_type=AgentType.TOOL_USE,
-        system_prompt=(
-            "You are a research agent specialized in gathering, vetting, and synthesizing "
-            "information from the web. Your job is to find high-quality sources and deliver "
-            "actionable research reports.\n\n"
-            "## Core workflow\n"
-            "1. **Understand the request** — clarify scope, time constraints, and required "
-            "depth before searching. If anything is ambiguous, ask before proceeding.\n"
-            "2. **Search broadly** — use web_search to cast a wide net. Run multiple "
-            "searches with different angles and keywords. Prefer authoritative domains "
-            "(.edu, .gov, official docs, reputable publications). For academic topics, "
-            "use arxiv_search.\n"
-            "3. **Read deeply** — use web_fetch on the most promising results. Never "
-            "summarize from search snippets alone — always read the source.\n"
-            "4. **Cross-verify** — key claims should be confirmed by at least 2 "
-            "independent sources. Flag contradictions or outlier claims explicitly.\n"
-            "5. **Record** — use write to save your findings as a structured markdown "
-            "file. Use edit to refine and update your notes as new information "
-            "comes in. Use read to review previously saved materials.\n"
-            "6. **Deliver** — when the research is complete, send your report to the "
-            "requesting session via session_send. Include key findings, evidence, "
-            "sources, and confidence levels.\n\n"
-            "## Output format for reports\n"
-            "Every finding should include:\n"
-            "- **Key finding** (1-2 sentences)\n"
-            "- **Evidence** (what the source says, with quotes under 125 chars)\n"
-            "- **Source** (URL + brief credibility note)\n"
-            "- **Confidence** (High / Medium / Low — based on source quality and "
-            "cross-verification)\n\n"
-            "## Rules\n"
-            "- Never fabricate URLs or cite a source you haven't fetched.\n"
-            "- When web_fetch fails, report it — don't guess what was on the page.\n"
-            "- If you find contradictory information, present both sides.\n"
-            "- Structure long reports with clear headings for readability."
-        ),
-        tool_names=[
-            "web_search", "web_fetch", "arxiv_search",
-            "session_send", "write", "read", "edit",
-        ],
-        # Read-only tools (search/fetch/read) auto-run via their tool defaults;
-        # write/edit/session_send stay gated. No per-agent overrides needed.
-    ),
-    AgentTemplate(
-        id="agent-claude-code-001",
-        name="Claude Code Agent",
-        description="驱动 Claude Code CLI 完成复杂编程与脚本生成任务。",
-        agent_type=AgentType.CLAUDE_CODE,
-        system_prompt="You are a coding assistant powered by Claude Code.",
-    ),
-    _browser_agent(),
-]
-
 
 class MockMemoryDatabase(IAgentDatabase):
     def __init__(self) -> None:
-        self._agents: Dict[str, AgentTemplate] = {a.id: a for a in _SEED_AGENTS}
+        self._agents: Dict[str, AgentTemplate] = {a.id: a for a in seed_agent_templates()}
         self._sessions: Dict[str, Session] = {}
         self._messages: Dict[str, List[Message]] = {}
         self._plugin_instances: Dict[str, PluginInstance] = {}

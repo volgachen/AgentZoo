@@ -1,8 +1,8 @@
 """Seed template for the Chrome-controlling agent.
 
-Defined here rather than inline in `_SEED_AGENTS` because its system prompt is
-built at import time from the installed codex plugin's SKILL.md, and both
-`db/mysql.py` and `db/mock.py` need the identical value.
+Defined here rather than inline in `SEED_AGENT_ROWS` because its system prompt is
+built at import time from the installed codex plugin's SKILL.md, and all database
+backends need the identical value.
 """
 
 from app.adapters.node_repl.codex_skill import load_codex_skill_prompt
