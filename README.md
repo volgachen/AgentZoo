@@ -61,7 +61,7 @@ Augentia 需要数据库来保存会话记录和状态信息。在本地开发�
 
 ```dotenv
 DB_TYPE="sqlite"
-SQLITE_PATH="backend/.local/augentia.db"
+SQLITE_PATH=".local/augentia.db"
 ```
 
 本项目同样支持使用专门的 MySQL 数据库服务存储这些信息（`DB_TYPE=mysql`）。如果你已经有可用的 MySQL 服务，也可以继续在 `backend/.env` 中配置 MySQL 连接信息：
