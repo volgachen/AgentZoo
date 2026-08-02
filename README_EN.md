@@ -13,7 +13,7 @@ Augentia is a local-first AI workspace for multi-agent collaboration. It provide
 
 ## Vision
 
-AI should not simply create more automation, more metrics, and more anxiety. Augentia explores a more human-centered way of working with AI: AI as a companion, an extension of human capability, and a collaborative system, not as a boss or an employee.
+AI should not simply create more automation, more standardized workflows, and more anxiety. Augentia explores a more human-centered way of working with AI: AI as a companion, an extension of human capability, and a collaborative system, not as a boss or an employee.
 
 The goal of this project is not to make agents do everything on behalf of people. Instead, Augentia aims to help agents support people better: handling complex or tedious work, extending information-processing capacity, creating room for parallel exploration, reducing attention drain, and keeping final judgment, direction, and creativity in human hands.
 
@@ -24,6 +24,8 @@ Therefore, Augentia cares about more than whether a task can be fully automated.
 - Can the system help people amplify their judgment, creativity, organization, and ability to act?
 
 Augentia's long-term direction is to become a **human-centered agentic work ecosystem**.
+
+Before reaching that long-term direction, Augentia will first focus on **building an AI workspace tailored to my own way of working**.
 
 <p align="center">
   <em>AI that helps instead of causing anxiety.</em><br />
@@ -61,7 +63,7 @@ Use the following in `backend/.env`:
 
 ```dotenv
 DB_TYPE="sqlite"
-SQLITE_PATH="backend/.local/augentia.db"
+SQLITE_PATH=".local/augentia.db"
 ```
 
 Augentia also supports a dedicated MySQL database service (`DB_TYPE=mysql`). If you already have a MySQL service available, configure the connection in `backend/.env`:
@@ -84,18 +86,25 @@ Before starting the backend, configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPE
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 12598
+python run.py
+# You can also run: uvicorn app.main:app --host 0.0.0.0 --port 12598
 # API available at http://<your-ip>:12598
 # Docs available at http://<your-ip>:12598/docs
 ```
 
 ### 3. Start the frontend service
 
+The frontend code is located in `frontend/`. After installing Node.js, use the following commands to install dependencies and start the development server.
+
 ```bash
 cd frontend
 npm install
 npm run dev
 # Dashboard available at http://<your-ip>:12599
+
+# For production use, build first and then serve the static files
+npm run build
+npx http-server dist -p 12599
 ```
 
 ## Roadmap
@@ -107,3 +116,5 @@ npm run dev
 ## Acknowledgements
 
 Many design ideas in this project are inspired by industry products such as Codex and Claude Code. Thanks also to projects such as [wechatbot](https://github.com/corespeed-io/wechatbot) for providing useful capabilities.
+
+You are welcome to use Augentia and join the discussion.

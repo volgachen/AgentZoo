@@ -13,7 +13,7 @@ Augentia 是一个面向多智能体协作的本地优先 AI 工作台。它提�
 
 ## 项目愿景
 
-AI 不应该只是制造更多自动化、更多指标和更多焦虑。Augentia 希望探索一种更适合人的 AI 工作方式：AI 不是老板，也不是员工，而是人的同行者、能力外延和协作系统。
+AI 不应该只是制造更多自动化、更多标准化流程和更多焦虑。Augentia 希望探索一种更适合人的 AI 工作方式：AI 不是老板，也不是员工，而是人的同行者、能力外延和协作系统。
 
 这个项目的核心目标不是让 Agent 替人完成一切，而是让 Agent 更好地支撑人：承接繁杂任务，扩展信息处理能力，提供并行探索空间，减少对注意力的消耗，同时把最终的判断权、方向感和创造性留给人。
 
@@ -24,6 +24,8 @@ AI 不应该只是制造更多自动化、更多指标和更多焦虑。Augentia
 - 系统能否帮助人放大判断、创造、组织和行动的能力。
 
 Augentia 的长期方向，是成为一个**以人为中心的 Agent 工作生态**。
+
+在实现这个长期方向之前，Augentia 会先专注于**打造一个为我自己量身定做的 AI 工作台**。
 
 <p align="center">
   <em>让 AI 带来助力而非焦虑。</em><br />
@@ -84,18 +86,25 @@ MYSQL_DATABASE="augentia"
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 12598
+python run.py
+# 也可以运行：uvicorn app.main:app --host 0.0.0.0 --port 12598
 # API available at http://<your-ip>:12598
 # Docs available at http://<your-ip>:12598/docs
 ```
 
 ### 3. 启动前端服务
 
+前端代码位于 `frontend/` 目录下。安装 Node.js 后，可以按下面的命令安装依赖并启动开发服务。
+
 ```bash
 cd frontend
 npm install
 npm run dev
 # Dashboard available at http://<your-ip>:12599
+
+# 如需要正式使用，请先编译再部署静态文件
+npm run build
+npx http-server dist -p 12599
 ```
 
 ## 后续开发计划
@@ -107,3 +116,5 @@ npm run dev
 ## 致谢
 
 此项目的许多设计理念借鉴了 Codex、Claude Code 等业内知名产品，同时也感谢 [wechatbot](https://github.com/corespeed-io/wechatbot) 等项目提供的能力支持。
+
+欢迎使用，并一起交流讨论。
