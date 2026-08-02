@@ -28,4 +28,8 @@ backend/.local/
 # Local-only docs (kept out of git history)
 docs/
 codex_plugins/
+examples/
+tmp/
 TODO.md
+CLAUDE.md
+/test_*.py
