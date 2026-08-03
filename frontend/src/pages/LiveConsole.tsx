@@ -339,6 +339,8 @@ export default function LiveConsole() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const [focusedItemIndex, setFocusedItemIndex] = useState<number | null>(null);
 
   const entry = sessionId ? sessions[sessionId] : undefined;
 
@@ -380,6 +382,10 @@ export default function LiveConsole() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [entry?.events.length, entry?.session.status]);
 
+  useEffect(() => {
+    itemRefs.current = itemRefs.current.slice(0, entry?.events.length ?? 0);
+  }, [entry?.events.length]);
+
   if (!entry) {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3 text-gray-400">
@@ -397,6 +403,23 @@ export default function LiveConsole() {
   const { session, events } = entry;
   const generating = session.status === "RUNNING";
   const consoleItems = buildConsoleItems(events);
+
+  const scrollToConsoleItem = (index: number) => {
+    const nextIndex = Math.max(0, Math.min(index, consoleItems.length - 1));
+    const node = itemRefs.current[nextIndex];
+    if (!node) return;
+    setFocusedItemIndex(nextIndex);
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handleConsoleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    if (consoleItems.length === 0) return;
+
+    e.preventDefault();
+    const currentIndex = focusedItemIndex ?? consoleItems.length - 1;
+    scrollToConsoleItem(e.key === "ArrowUp" ? currentIndex - 1 : currentIndex + 1);
+  };
 
   const handleSend = () => {
     const msg = input.trim();
@@ -466,29 +489,51 @@ export default function LiveConsole() {
       {/* Body: event log + status sidebar */}
       <div className="flex-1 flex gap-3 min-h-0">
         {/* Event log */}
-        <div className="flex-1 bg-gray-900 rounded-xl border border-gray-700 p-4 overflow-y-auto flex flex-col gap-1 min-h-0">
+        <div
+          tabIndex={0}
+          onKeyDown={handleConsoleKeyDown}
+          className="flex-1 bg-gray-900 rounded-xl border border-gray-700 p-4 overflow-y-auto flex flex-col gap-1 min-h-0 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          aria-label="Event log. Use arrow up and arrow down to jump between messages."
+        >
+          {consoleItems.length > 1 && (
+            <div className="sticky top-0 z-10 self-end rounded bg-gray-950/80 px-2 py-1 text-[11px] text-gray-500 backdrop-blur">
+              聚焦日志后，按 ↑ / ↓ 跳到上一条 / 下一条
+            </div>
+          )}
           {consoleItems.length === 0 && (
             <p className="text-gray-600 text-sm font-mono">Waiting for output…</p>
           )}
           {consoleItems.map((item, i) => (
-            <ConsoleItemLine
+            <div
               key={isToolCallView(item) ? item.callId : item.message_id ?? i}
-              item={item}
-              editingMessageId={editingMessageId}
-              editingContent={editingContent}
-              generating={generating}
-              onStartEdit={(event) => {
-                if (generating || event.type !== "user" || !event.message_id) return;
-                setEditingMessageId(event.message_id);
-                setEditingContent(String(event.data ?? ""));
+              ref={(node) => {
+                itemRefs.current[i] = node;
               }}
-              onEditChange={setEditingContent}
-              onCancelEdit={() => {
-                setEditingMessageId(null);
-                setEditingContent("");
-              }}
-              onSubmitEdit={handleRetrySend}
-            />
+              className={
+                focusedItemIndex === i
+                  ? "rounded-md bg-indigo-950/20 ring-1 ring-indigo-700/60"
+                  : ""
+              }
+              onClick={() => setFocusedItemIndex(i)}
+            >
+              <ConsoleItemLine
+                item={item}
+                editingMessageId={editingMessageId}
+                editingContent={editingContent}
+                generating={generating}
+                onStartEdit={(event) => {
+                  if (generating || event.type !== "user" || !event.message_id) return;
+                  setEditingMessageId(event.message_id);
+                  setEditingContent(String(event.data ?? ""));
+                }}
+                onEditChange={setEditingContent}
+                onCancelEdit={() => {
+                  setEditingMessageId(null);
+                  setEditingContent("");
+                }}
+                onSubmitEdit={handleRetrySend}
+              />
+            </div>
           ))}
           {generating && (
             <div className="flex items-center gap-2 font-mono text-sm text-indigo-300">
