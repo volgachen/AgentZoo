@@ -23,6 +23,7 @@ import os
 import signal
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from wechatbot import WeChatBot
@@ -71,6 +72,18 @@ class PluginConfig:
         ]
 
 
+@dataclass
+class SessionBotState:
+    session_id: str
+    status: str = "Not Connected"
+    message: str = "Click Connect to login."
+    bot: WeChatBot | None = None
+    task: asyncio.Task[None] | None = None
+    last_wechat_user_id: str | None = None
+    qr_url: str | None = None
+    error: str | None = None
+
+
 class AugentiaHost:
     """Placeholder for the future Augentia plugin protocol.
 
@@ -110,63 +123,40 @@ def plain_text_content(content: Any) -> str | None:
 class WeChatBridgePlugin:
     def __init__(self, config: PluginConfig) -> None:
         self.config = config
-        # WeChatBot() performs QR-code login as part of initialization.
-        self.bot = WeChatBot()
         self.host = AugentiaHost()
         self._stop = asyncio.Event()
-        self._last_wechat_user_id: str | None = None
-        self._register_handlers()
-
-    def _register_handlers(self) -> None:
-        @self.bot.on_message
-        async def handle(msg):
-            await self.on_wechat_message(
-                wechat_user_id=msg.user_id,
-                text=msg.text,
-                raw_message=msg,
-            )
+        self._session_states: dict[str, SessionBotState] = {}
 
     async def run(self) -> None:
         print("wechat-bridge starting", flush=True)
         print(f"instance_id={os.getenv('AUGENTIA_PLUGIN_INSTANCE_ID')}", flush=True)
         print(f"run_id={os.getenv('AUGENTIA_PLUGIN_RUN_ID')}", flush=True)
         print(f"config={self.config}", flush=True)
-        print("wechat-bridge delegating to WeChatBot.run()", flush=True)
-        bot_task = asyncio.create_task(asyncio.to_thread(self.bot.run))
-        stdin_task = asyncio.create_task(self._stdin_event_loop())
-        done, pending = await asyncio.wait(
-            {bot_task, stdin_task},
-            return_when=asyncio.FIRST_EXCEPTION,
-        )
-        for task in pending:
-            task.cancel()
-        for task in done:
-            exc = task.exception()
-            if exc:
-                raise exc
+        try:
+            await self._stdin_event_loop()
+        finally:
+            for session_id in list(self._session_states):
+                await self._disconnect_session(session_id)
 
-    async def on_wechat_message(self, *, wechat_user_id: str, text: str, raw_message: Any) -> None:
-        print(f"收到消息，user_id = {wechat_user_id}", flush=True)
+    async def on_wechat_message(
+        self,
+        *,
+        session_id: str,
+        wechat_user_id: str,
+        text: str,
+        raw_message: Any,
+    ) -> None:
+        print(f"收到消息，session_id={session_id} user_id={wechat_user_id}", flush=True)
         print(f"消息内容 = {text}", flush=True)
-        self._last_wechat_user_id = wechat_user_id
+        state = self._session_state(session_id)
+        state.last_wechat_user_id = wechat_user_id
 
         if text.startswith(self.config.command_prefix):
             await self.handle_command(
+                session_id=session_id,
                 wechat_user_id=wechat_user_id,
                 text=text,
                 raw_message=raw_message,
-            )
-            return
-
-        session_id = self.config.session_for_wechat_user(wechat_user_id)
-        if not session_id:
-            await self.bot.send(
-                wechat_user_id,
-                "No Augentia session is bound for this WeChat user.",
-            )
-            print(
-                f"no target session for wechat user={wechat_user_id}; message ignored",
-                flush=True,
             )
             return
 
@@ -176,30 +166,36 @@ class WeChatBridgePlugin:
             source=f"wechat:{wechat_user_id}",
         )
 
-    async def handle_command(self, *, wechat_user_id: str, text: str, raw_message: Any) -> None:
+    async def handle_command(
+        self,
+        *,
+        session_id: str,
+        wechat_user_id: str,
+        text: str,
+        raw_message: Any,
+    ) -> None:
         parts = text.strip().split()
         command = parts[1] if len(parts) >= 2 else "help"
+        state = self._session_state(session_id)
+        bot = state.bot
+        if bot is None:
+            return
 
         if command == "status":
-            session_id = self.config.session_for_wechat_user(wechat_user_id)
-            await self.bot.send(
+            await bot.send(
                 wechat_user_id,
-                f"Augentia WeChat bridge is running. Current session: {session_id or 'not bound'}",
+                f"Augentia WeChat bridge is connected to session: {session_id}",
             )
             return
 
         if command == "help":
-            await self.bot.send(
+            await bot.send(
                 wechat_user_id,
                 f"Commands: {self.config.command_prefix} status",
             )
             return
 
-        # Future command examples:
-        #   \cmd session <session_id>
-        #   \cmd bind <session_id>
-        # Those require a persistent config update action from the plugin host.
-        await self.bot.send(wechat_user_id, f"Unknown command: {command}")
+        await bot.send(wechat_user_id, f"Unknown command: {command}")
 
     async def _stdin_event_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -233,6 +229,119 @@ class WeChatBridgePlugin:
         }
         print(json.dumps(frame, ensure_ascii=False), flush=True)
 
+    def _session_state(self, session_id: str) -> SessionBotState:
+        state = self._session_states.get(session_id)
+        if state is None:
+            state = SessionBotState(session_id=session_id)
+            self._session_states[session_id] = state
+        return state
+
+    def _state_data(self, state: SessionBotState) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "session_id": state.session_id,
+            "status": state.status,
+            "message": state.message,
+        }
+        if state.qr_url:
+            data["qr_url"] = state.qr_url
+        if state.error:
+            data["error"] = state.error
+        return data
+
+    def _cred_path(self, session_id: str) -> str:
+        root = Path(os.getenv("AUGENTIA_PLUGIN_ROOT") or ".")
+        return str(root / ".state" / "sessions" / session_id / "credentials.json")
+
+    async def _connect_session(self, session_id: str) -> SessionBotState:
+        state = self._session_state(session_id)
+        if state.status in {"Connected", "Connecting", "Waiting QR Login"}:
+            return state
+
+        state.status = "Connecting"
+        state.message = "Connecting..."
+        state.error = None
+        state.qr_url = None
+        self.emit_session_log(session_id, "connecting")
+        state.task = asyncio.create_task(self._login_and_run_session_bot(state))
+        return state
+
+    async def _login_and_run_session_bot(self, state: SessionBotState) -> None:
+        session_id = state.session_id
+
+        def on_qr_url(qr_url: str) -> None:
+            state.status = "Waiting QR Login"
+            state.qr_url = qr_url
+            state.message = f"请扫码登录：{qr_url}"
+            self.emit_session_log(session_id, f"QR login required: {qr_url}")
+
+        def on_scanned() -> None:
+            state.message = "QR scanned. Confirm login in WeChat."
+            self.emit_session_log(session_id, "QR scanned")
+
+        def on_expired() -> None:
+            state.message = "QR expired. Waiting for a refreshed QR code."
+            self.emit_session_log(session_id, "QR expired", level="warning")
+
+        def on_error(exc: Exception) -> None:
+            state.status = "Error"
+            state.error = str(exc)
+            state.message = f"Error: {exc}"
+            self.emit_session_log(session_id, f"bot error: {exc}", level="error")
+
+        bot = WeChatBot(
+            cred_path=self._cred_path(session_id),
+            on_qr_url=on_qr_url,
+            on_scanned=on_scanned,
+            on_expired=on_expired,
+            on_error=on_error,
+        )
+
+        @bot.on_message
+        async def handle(msg):
+            await self.on_wechat_message(
+                session_id=session_id,
+                wechat_user_id=msg.user_id,
+                text=msg.text,
+                raw_message=msg,
+            )
+
+        try:
+            await bot.login()
+            state.bot = bot
+            state.status = "Connected"
+            state.message = "Click to disconnect"
+            state.qr_url = None
+            state.error = None
+            self.emit_session_log(session_id, "session connected")
+            await bot.start()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state.status = "Error"
+            state.error = str(exc)
+            state.message = f"Error: {exc}"
+            self.emit_session_log(session_id, f"connect failed: {exc}", level="error")
+
+    async def _disconnect_session(self, session_id: str) -> SessionBotState:
+        state = self._session_state(session_id)
+        self.emit_session_log(session_id, "disconnecting")
+        if state.bot is not None:
+            state.bot.stop()
+        if state.task is not None:
+            state.task.cancel()
+            try:
+                await state.task
+            except asyncio.CancelledError:
+                pass
+        state.bot = None
+        state.task = None
+        state.status = "Not Connected"
+        state.message = "Click Connect to login."
+        state.qr_url = None
+        state.error = None
+        self.emit_session_log(session_id, "session disconnected")
+        return state
+
     async def on_command(self, frame: dict[str, Any]) -> None:
         command_id = frame.get("id")
         command = frame.get("command")
@@ -255,11 +364,7 @@ class WeChatBridgePlugin:
                 "type": "response",
                 "id": command_id,
                 "ok": True,
-                "data": {
-                    "session_id": session_id,
-                    "status": "not_connected",
-                    "message": "wechat-bridge session console is ready",
-                },
+                "data": self._state_data(self._session_state(session_id)),
             }
         elif command == "session_dialog.input":
             text = data.get("text")
@@ -271,16 +376,24 @@ class WeChatBridgePlugin:
                     "error": "text is required",
                 }
             else:
+                normalized = text.strip().lower()
                 self.emit_session_log(session_id, f"operator input: {text.strip()}")
+                if normalized in {"connect", "login"}:
+                    state = await self._connect_session(session_id)
+                elif normalized == "disconnect":
+                    state = await self._disconnect_session(session_id)
+                else:
+                    state = self._session_state(session_id)
+                    self.emit_session_log(
+                        session_id,
+                        f"unknown input: {text.strip()}; use connect or disconnect",
+                        level="warning",
+                    )
                 response = {
                     "type": "response",
                     "id": command_id,
                     "ok": True,
-                    "data": {
-                        "session_id": session_id,
-                        "status": "not_connected",
-                        "message": f"received input: {text.strip()}",
-                    },
+                    "data": self._state_data(state),
                 }
         else:
             response = {
@@ -324,15 +437,22 @@ class WeChatBridgePlugin:
         if not text:
             print("ignored empty agent text", flush=True)
             return
-        if not self._last_wechat_user_id:
-            print("no last WeChat user; reply ignored", flush=True)
+        if not isinstance(session_id, str):
+            print("ignored message.created without session_id", flush=True)
+            return
+        state = self._session_state(session_id)
+        if state.bot is None or state.status != "Connected":
+            print(f"session={session_id} is not connected; reply ignored", flush=True)
+            return
+        if not state.last_wechat_user_id:
+            print(f"session={session_id} has no last WeChat user; reply ignored", flush=True)
             return
 
         print(
-            f"forwarding agent reply to last wechat user={self._last_wechat_user_id}",
+            f"forwarding agent reply session={session_id} to wechat user={state.last_wechat_user_id}",
             flush=True,
         )
-        await self.bot.send(self._last_wechat_user_id, text)
+        await state.bot.send(state.last_wechat_user_id, text)
 
 
 async def async_main() -> None:

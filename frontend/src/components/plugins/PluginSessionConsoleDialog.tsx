@@ -45,6 +45,13 @@ function statusMessage(response: Record<string, unknown> | null): string {
   return typeof message === "string" ? message : "";
 }
 
+function statusValue(response: Record<string, unknown> | null): string {
+  const data = responseData(response);
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+  const status = (data as Record<string, unknown>).status;
+  return typeof status === "string" ? status : "";
+}
+
 export default function PluginSessionConsoleDialog({
   sessionId,
   plugin,
@@ -52,7 +59,6 @@ export default function PluginSessionConsoleDialog({
   onClose,
 }: Props) {
   const [busy, setBusy] = useState(false);
-  const [input, setInput] = useState("");
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const [logs, setLogs] = useState<PluginLogLine[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -82,17 +88,13 @@ export default function PluginSessionConsoleDialog({
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => {
-      void loadLogs().catch((err) =>
-        setError(err instanceof Error ? err.message : String(err)),
-      );
+      void refresh();
     }, 2000);
     return () => window.clearInterval(timer);
     // Intentionally refresh when the selected plugin/session changes.
   }, [instance.id, sessionId]);
 
-  const sendInput = async () => {
-    const text = input.trim();
-    if (!text) return;
+  const sendAction = async (text: "connect" | "disconnect") => {
     setBusy(true);
     setError(null);
     try {
@@ -101,7 +103,6 @@ export default function PluginSessionConsoleDialog({
         data: { session_id: sessionId, text },
       });
       setStatus(response);
-      setInput("");
       await loadLogs();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -109,6 +110,10 @@ export default function PluginSessionConsoleDialog({
       setBusy(false);
     }
   };
+
+  const currentStatus = statusValue(status);
+  const isConnected = currentStatus === "Connected";
+  const isPending = currentStatus === "Connecting" || currentStatus === "Waiting QR Login";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
@@ -158,22 +163,17 @@ export default function PluginSessionConsoleDialog({
         </div>
 
         {error && <div className="px-5 pb-2 text-xs text-red-300">{error}</div>}
-        <div className="flex gap-2 px-5 pt-2 pb-4">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void sendInput();
-            }}
-            placeholder="Type plugin input for this session, for example: status"
-            className="flex-1 rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-600"
-          />
+        <div className="flex justify-end px-5 pt-2 pb-4">
           <button
-            onClick={sendInput}
-            disabled={busy || !input.trim()}
-            className="rounded bg-indigo-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void sendAction(isConnected ? "disconnect" : "connect")}
+            disabled={busy || isPending}
+            className={`rounded px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              isConnected
+                ? "bg-red-700 hover:bg-red-600"
+                : "bg-indigo-700 hover:bg-indigo-600"
+            }`}
           >
-            {busy ? "Sending..." : "Send"}
+            {busy || isPending ? "Connecting..." : isConnected ? "Disconnect" : "Connect"}
           </button>
         </div>
       </div>
