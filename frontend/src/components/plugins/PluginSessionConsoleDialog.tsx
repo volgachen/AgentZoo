@@ -30,7 +30,9 @@ function formatStateData(response: Record<string, unknown> | null): string {
   const data = responseData(response);
   if (!data) return "No status loaded yet.";
   if (typeof data !== "object" || Array.isArray(data)) return formatValue(data);
-  const entries = Object.entries(data as Record<string, unknown>);
+  const entries = Object.entries(data as Record<string, unknown>).filter(
+    ([key]) => key !== "message",
+  );
   if (entries.length === 0) return "No status data.";
   const keyWidth = Math.max(...entries.map(([key]) => key.length));
   return entries
@@ -50,6 +52,28 @@ function statusValue(response: Record<string, unknown> | null): string {
   if (!data || typeof data !== "object" || Array.isArray(data)) return "";
   const status = (data as Record<string, unknown>).status;
   return typeof status === "string" ? status : "";
+}
+
+function sanitizeMessageHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const allowed = new Set(["A"]);
+  for (const el of Array.from(doc.body.querySelectorAll("*"))) {
+    if (!allowed.has(el.tagName)) {
+      el.replaceWith(doc.createTextNode(el.textContent ?? ""));
+      continue;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name !== "href") el.removeAttribute(attr.name);
+    }
+    const href = el.getAttribute("href") ?? "";
+    if (!/^https?:\/\//i.test(href)) {
+      el.removeAttribute("href");
+    } else {
+      el.setAttribute("target", "_blank");
+      el.setAttribute("rel", "noreferrer");
+    }
+  }
+  return doc.body.innerHTML;
 }
 
 export default function PluginSessionConsoleDialog({
@@ -156,9 +180,10 @@ export default function PluginSessionConsoleDialog({
           </div>
 
           {statusMessage(status) && (
-            <div className="whitespace-pre-wrap text-xs leading-5 text-gray-400">
-              {statusMessage(status)}
-            </div>
+            <div
+              className="whitespace-pre-wrap text-xs leading-5 text-gray-400 [&_a]:text-indigo-300 [&_a]:underline [&_a:hover]:text-indigo-200"
+              dangerouslySetInnerHTML={{ __html: sanitizeMessageHtml(statusMessage(status)) }}
+            />
           )}
         </div>
 

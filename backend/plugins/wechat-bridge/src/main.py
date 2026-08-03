@@ -271,7 +271,7 @@ class WeChatBridgePlugin:
         def on_qr_url(qr_url: str) -> None:
             state.status = "Waiting QR Login"
             state.qr_url = qr_url
-            state.message = f"请扫码登录：{qr_url}"
+            state.message = f'请点击 <a href="{qr_url}">这里</a> 扫码登录。'
             self.emit_session_log(session_id, f"QR login required: {qr_url}")
 
         def on_scanned() -> None:
