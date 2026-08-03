@@ -113,7 +113,7 @@ export default function PluginSessionConsoleDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
       <div className="flex h-[80vh] w-full max-w-4xl flex-col rounded-xl border border-gray-700 bg-gray-900 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
+        <div className="flex items-center justify-between px-5 pt-4 pb-2">
           <h2 className="text-lg font-semibold text-white">{plugin.name}</h2>
           <button
             onClick={onClose}
@@ -123,13 +123,13 @@ export default function PluginSessionConsoleDialog({
           </button>
         </div>
 
-        <div className="border-b border-gray-800 px-5 py-4 text-xs">
-          <pre className="max-h-32 overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-gray-400">
+        <div className="px-5 py-2 text-xs">
+          <pre className="max-h-24 overflow-auto whitespace-pre-wrap font-mono text-xs leading-4 text-gray-400">
             {formatStateData(status)}
           </pre>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 px-5 py-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 px-5 py-2">
           <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-gray-800 bg-gray-950">
             <div className="flex items-center justify-between border-b border-gray-800 px-3 py-2 text-xs font-medium text-gray-300">
               <span>Session logs</span>
@@ -158,7 +158,7 @@ export default function PluginSessionConsoleDialog({
         </div>
 
         {error && <div className="px-5 pb-2 text-xs text-red-300">{error}</div>}
-        <div className="flex gap-2 border-t border-gray-800 px-5 py-4">
+        <div className="flex gap-2 px-5 pt-2 pb-4">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
