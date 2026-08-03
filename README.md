@@ -11,6 +11,8 @@
 
 Augentia 是一个面向多智能体协作的本地优先 AI 工作台。它提供统一的 Agent 网关、实时会话控制台、人工确认机制、跨会话协作能力和可扩展的工具/插件运行环境，让人可以同时调度多个 AI 会话，并在判断、切换、确认和整合时保持主导。
 
+<iframe width="560" height="315" src="https://www.youtube.com/embed/UabvaxV5czM?si=i-7-7-6nHybK847A" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
 ## 项目愿景
 
 AI 不应该只是制造更多自动化、更多标准化流程和更多焦虑。Augentia 希望探索一种更适合人的 AI 工作方式：AI 不是老板，也不是员工，而是人的同行者、能力外延和协作系统。

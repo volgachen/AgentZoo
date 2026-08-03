@@ -9,6 +9,8 @@
   <a href="README.md">中文</a> · <a href="README_EN.md">English</a>
 </p>
 
+<iframe width="560" height="315" src="https://www.youtube.com/embed/UabvaxV5czM?si=i-7-7-6nHybK847A" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
 Augentia is a local-first AI workspace for multi-agent collaboration. It provides a unified agent gateway, a real-time session console, human confirmation gates, cross-session collaboration, and an extensible tool/plugin runtime, allowing people to orchestrate multiple AI sessions at once while staying in control of judgment, switching, confirmation, and synthesis.
 
 ## Vision
