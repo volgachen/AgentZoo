@@ -212,11 +212,84 @@ class WeChatBridgePlugin:
             except json.JSONDecodeError:
                 print(f"ignored non-json stdin frame: {line.rstrip()}", flush=True)
                 continue
-            if frame.get("type") != "event":
+            frame_type = frame.get("type")
+            if frame_type == "event":
+                event = frame.get("event") or {}
+                if event.get("type") == "message.created":
+                    await self.on_augentia_message_created(event)
                 continue
-            event = frame.get("event") or {}
-            if event.get("type") == "message.created":
-                await self.on_augentia_message_created(event)
+            if frame_type == "command":
+                await self.on_command(frame)
+                continue
+
+    def emit_session_log(self, session_id: str, line: str, *, level: str = "info") -> None:
+        frame = {
+            "type": "plugin_log",
+            "data": {
+                "session_id": session_id,
+                "level": level,
+                "line": line,
+            },
+        }
+        print(json.dumps(frame, ensure_ascii=False), flush=True)
+
+    async def on_command(self, frame: dict[str, Any]) -> None:
+        command_id = frame.get("id")
+        command = frame.get("command")
+        data = frame.get("data") or {}
+        if not isinstance(command_id, str):
+            return
+        session_id = data.get("session_id")
+        if command in {"session_dialog.status", "session_dialog.input"} and not isinstance(session_id, str):
+            response = {
+                "type": "response",
+                "id": command_id,
+                "ok": False,
+                "error": "session_id is required",
+            }
+            print(json.dumps(response, ensure_ascii=False), flush=True)
+            return
+
+        if command == "session_dialog.status":
+            response = {
+                "type": "response",
+                "id": command_id,
+                "ok": True,
+                "data": {
+                    "session_id": session_id,
+                    "status": "not_connected",
+                    "message": "wechat-bridge session console is ready",
+                },
+            }
+        elif command == "session_dialog.input":
+            text = data.get("text")
+            if not isinstance(text, str) or not text.strip():
+                response = {
+                    "type": "response",
+                    "id": command_id,
+                    "ok": False,
+                    "error": "text is required",
+                }
+            else:
+                self.emit_session_log(session_id, f"operator input: {text.strip()}")
+                response = {
+                    "type": "response",
+                    "id": command_id,
+                    "ok": True,
+                    "data": {
+                        "session_id": session_id,
+                        "status": "not_connected",
+                        "message": f"received input: {text.strip()}",
+                    },
+                }
+        else:
+            response = {
+                "type": "response",
+                "id": command_id,
+                "ok": False,
+                "error": f"unsupported command: {command}",
+            }
+        print(json.dumps(response, ensure_ascii=False), flush=True)
 
     async def on_augentia_message_created(self, event: dict[str, Any]) -> None:
         """Handle Augentia message.created events from stdin."""

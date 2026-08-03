@@ -297,6 +297,7 @@ class MockMemoryDatabase(IAgentDatabase):
         line: str,
         *,
         level: str | None = None,
+        session_id: str | None = None,
     ) -> PluginLog:
         await self.get_plugin_instance(plugin_instance_id)
         await self.get_plugin_run(plugin_run_id)
@@ -305,6 +306,7 @@ class MockMemoryDatabase(IAgentDatabase):
             id=self._plugin_log_counter,
             plugin_instance_id=plugin_instance_id,
             plugin_run_id=plugin_run_id,
+            session_id=session_id,
             stream=stream,
             level=level,
             line=line,
@@ -317,6 +319,7 @@ class MockMemoryDatabase(IAgentDatabase):
         *,
         plugin_instance_id: str | None = None,
         plugin_run_id: str | None = None,
+        session_id: str | None = None,
         limit: int = 500,
     ) -> List[PluginLog]:
         logs = list(self._plugin_logs.values())
@@ -324,6 +327,8 @@ class MockMemoryDatabase(IAgentDatabase):
             logs = [l for l in logs if l.plugin_instance_id == plugin_instance_id]
         if plugin_run_id is not None:
             logs = [l for l in logs if l.plugin_run_id == plugin_run_id]
+        if session_id is not None:
+            logs = [l for l in logs if l.session_id == session_id]
         logs.sort(key=lambda l: (l.ts, l.id or 0))
         return logs[-limit:]
 

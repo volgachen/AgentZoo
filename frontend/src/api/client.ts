@@ -45,8 +45,12 @@ function browseQuery(path: string | null | undefined): string {
   return path ? `?path=${encodeURIComponent(path)}` : "";
 }
 
-function limitQuery(limit?: number): string {
-  return limit == null ? "" : `?limit=${encodeURIComponent(String(limit))}`;
+function pluginLogsQuery(limit?: number, sessionId?: string | null): string {
+  const params = new URLSearchParams();
+  if (limit != null) params.set("limit", String(limit));
+  if (sessionId) params.set("session_id", sessionId);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
 }
 
 export interface CreateAgentPayload {
@@ -72,6 +76,12 @@ export interface UpdatePluginInstancePayload {
   display_name?: string;
   config?: Record<string, unknown> | null;
   auto_start?: boolean;
+}
+
+export interface PluginCommandPayload {
+  command: string;
+  data?: Record<string, unknown>;
+  timeout_ms?: number;
 }
 
 export const api = {
@@ -161,13 +171,18 @@ export const api = {
       request<PluginInstance>(`/plugins/instances/${id}/stop`, { method: "POST" }),
     restartInstance: (id: string) =>
       request<PluginRun>(`/plugins/instances/${id}/restart`, { method: "POST" }),
+    command: (id: string, body: PluginCommandPayload) =>
+      request<Record<string, unknown>>(`/plugins/instances/${id}/commands`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     runs: (instanceId: string) =>
       request<PluginRun[]>(`/plugins/instances/${instanceId}/runs`),
     run: (runId: string) => request<PluginRun>(`/plugins/runs/${runId}`),
-    runLogs: (runId: string, limit?: number) =>
-      request<PluginLogLine[]>(`/plugins/runs/${runId}/logs${limitQuery(limit)}`),
-    instanceLogs: (instanceId: string, limit?: number) =>
-      request<PluginLogLine[]>(`/plugins/instances/${instanceId}/logs${limitQuery(limit)}`),
+    runLogs: (runId: string, limit?: number, sessionId?: string | null) =>
+      request<PluginLogLine[]>(`/plugins/runs/${runId}/logs${pluginLogsQuery(limit, sessionId)}`),
+    instanceLogs: (instanceId: string, limit?: number, sessionId?: string | null) =>
+      request<PluginLogLine[]>(`/plugins/instances/${instanceId}/logs${pluginLogsQuery(limit, sessionId)}`),
   },
 };
 

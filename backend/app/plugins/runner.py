@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ class PluginRunner:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._lock = asyncio.Lock()
         self._wait_task: asyncio.Task[None] | None = None
+        self._pending_commands: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._stopping = False
         self._status: PluginStatus = PluginStatus.STOPPED
         self._last_error: str | None = None
@@ -224,6 +226,39 @@ class PluginRunner:
                 logger.exception("failed to send plugin event instance=%s", self.instance_id)
                 await self._record_system(f"event delivery failed: {event.type}: {e}")
 
+    async def send_command(
+        self,
+        *,
+        command: str,
+        data: dict[str, Any] | None = None,
+        timeout: float = 10.0,
+    ) -> dict[str, Any]:
+        command_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        async with self._lock:
+            proc = self._proc
+            if proc is None or proc.stdin is None or self._status != PluginStatus.RUNNING:
+                raise RuntimeError("plugin instance is not running")
+            self._pending_commands[command_id] = future
+            frame = {
+                "type": "command",
+                "id": command_id,
+                "command": command,
+                "data": data or {},
+            }
+            try:
+                proc.stdin.write((json.dumps(frame, ensure_ascii=False) + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+            except Exception:
+                self._pending_commands.pop(command_id, None)
+                raise
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._pending_commands.pop(command_id, None)
+            raise RuntimeError(f"plugin command timed out: {command}")
+
     async def _supervise(self, instance_id: str, run_id: str) -> None:
         assert self._proc is not None
         proc = self._proc
@@ -285,16 +320,65 @@ class PluginRunner:
             await self._db.add_plugin_log(instance_id, run_id, name, line)
             await self._broadcast({"type": "log", "data": entry.model_dump(mode="json")})
             if name == "stdout":
-                await self._maybe_dispatch_action(instance_id, run_id, line)
+                await self._handle_stdout_frame(instance_id, run_id, line)
 
-    async def _maybe_dispatch_action(self, instance_id: str, run_id: str, line: str) -> None:
-        if self._action_dispatcher is None:
-            return
+    async def _handle_stdout_frame(self, instance_id: str, run_id: str, line: str) -> None:
         try:
             frame = json.loads(line)
         except json.JSONDecodeError:
             return
-        if not isinstance(frame, dict) or frame.get("type") != "action":
+        if not isinstance(frame, dict):
+            return
+        frame_type = frame.get("type")
+        if frame_type == "response":
+            await self._resolve_command_response(frame)
+            return
+        if frame_type == "plugin_event":
+            await self._broadcast({"type": "plugin_event", "data": frame})
+            return
+        if frame_type == "plugin_log":
+            await self._record_plugin_log_frame(instance_id, run_id, frame)
+            return
+        if frame_type == "action":
+            await self._maybe_dispatch_action(instance_id, run_id, frame)
+
+    async def _resolve_command_response(self, frame: dict[str, Any]) -> None:
+        command_id = frame.get("id")
+        if not isinstance(command_id, str):
+            return
+        future = self._pending_commands.pop(command_id, None)
+        if future is not None and not future.done():
+            future.set_result(frame)
+
+    async def _record_plugin_log_frame(self, instance_id: str, run_id: str, frame: dict[str, Any]) -> None:
+        data = frame.get("data") or {}
+        if not isinstance(data, dict):
+            await self._record_system("invalid plugin_log frame")
+            return
+        session_id = data.get("session_id")
+        line = data.get("line")
+        level = data.get("level")
+        if not isinstance(session_id, str) or not session_id:
+            await self._record_system("plugin_log requires data.session_id")
+            return
+        if not isinstance(line, str) or not line:
+            await self._record_system("plugin_log requires data.line")
+            return
+        if level is not None and not isinstance(level, str):
+            level = None
+        entry = self._buffer.append("plugin", line, level=level)
+        await self._db.add_plugin_log(
+            instance_id,
+            run_id,
+            "plugin",
+            line,
+            level=level,
+            session_id=session_id,
+        )
+        await self._broadcast({"type": "log", "data": entry.model_dump(mode="json") | {"session_id": session_id}})
+
+    async def _maybe_dispatch_action(self, instance_id: str, run_id: str, frame: dict[str, Any]) -> None:
+        if self._action_dispatcher is None:
             return
         action = frame.get("action")
         data = frame.get("data") or {}

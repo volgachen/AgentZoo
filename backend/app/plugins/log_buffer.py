@@ -4,13 +4,14 @@ from typing import Deque, Iterable, Literal
 from pydantic import BaseModel
 
 
-LogStream = Literal["stdout", "stderr", "system"]
+LogStream = Literal["stdout", "stderr", "system", "plugin"]
 
 
 class LogLine(BaseModel):
     ts: datetime
     stream: LogStream
     line: str
+    level: str | None = None
 
 
 class LogBuffer:
@@ -22,8 +23,8 @@ class LogBuffer:
         self._max_bytes = max_bytes
         self._bytes = 0
 
-    def append(self, stream: LogStream, line: str) -> LogLine:
-        entry = LogLine(ts=datetime.now(timezone.utc), stream=stream, line=line)
+    def append(self, stream: LogStream, line: str, *, level: str | None = None) -> LogLine:
+        entry = LogLine(ts=datetime.now(timezone.utc), stream=stream, level=level, line=line)
         size = len(line.encode("utf-8", errors="replace"))
         self._lines.append(entry)
         self._bytes += size

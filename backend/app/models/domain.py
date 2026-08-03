@@ -155,6 +155,7 @@ class PluginLog(BaseModel):
     id: int | None = None
     plugin_instance_id: str
     plugin_run_id: str
+    session_id: str | None = None
     ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     stream: str
     level: str | None = None

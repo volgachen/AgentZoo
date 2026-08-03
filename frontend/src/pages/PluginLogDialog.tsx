@@ -8,6 +8,7 @@ const LINE_STYLE: Record<PluginLogLine["stream"], string> = {
   stdout: "text-gray-200",
   stderr: "text-red-300",
   system: "text-gray-500 italic",
+  plugin: "text-indigo-200",
 };
 
 interface Props {

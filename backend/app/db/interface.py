@@ -149,6 +149,7 @@ class IAgentDatabase(ABC):
         line: str,
         *,
         level: str | None = None,
+        session_id: str | None = None,
     ) -> PluginLog: pass
 
     @abstractmethod
@@ -157,6 +158,7 @@ class IAgentDatabase(ABC):
         *,
         plugin_instance_id: str | None = None,
         plugin_run_id: str | None = None,
+        session_id: str | None = None,
         limit: int = 500,
     ) -> List[PluginLog]: pass
 

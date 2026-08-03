@@ -124,6 +124,7 @@ export interface PluginDefinition {
   name: string;
   version: string;
   scope: PluginScope;
+  has_session_dialog: boolean;
   provider: string;
   description: string;
   entry: PluginEntrySpec;
@@ -162,12 +163,13 @@ export interface PluginRun {
   updated_at: string;
 }
 
-export type PluginLogStream = "stdout" | "stderr" | "system";
+export type PluginLogStream = "stdout" | "stderr" | "system" | "plugin";
 
 export interface PluginLogLine {
   id?: number | null;
   plugin_instance_id?: string;
   plugin_run_id?: string;
+  session_id?: string | null;
   ts: string;
   stream: PluginLogStream;
   level?: string | null;
@@ -177,6 +179,7 @@ export interface PluginLogLine {
 export type PluginWsFrame =
   | { type: "plugin_instance_state"; data: PluginInstance }
   | { type: "log"; data: PluginLogLine }
+  | { type: "plugin_event"; data: Record<string, unknown> }
   | { type: "status"; data: { status: PluginStatus; error?: string | null; run_id?: string | null } }
   | { type: "logs_cleared"; data: null }
   | { type: "error"; data: string };

@@ -1,8 +1,10 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store/sessions";
+import { usePluginStore } from "../store/plugins";
 import { api } from "../api/client";
-import type { AgentTemplate, Session, SessionStatus } from "../api/types";
+import type { AgentTemplate, PluginDefinition, PluginInstance, Session, SessionStatus } from "../api/types";
+import PluginSessionConsoleDialog from "../components/plugins/PluginSessionConsoleDialog";
 
 function formatTimestamp(iso: string | null): string {
   // The backend stores timestamps as UTC but the DATETIME column serializes
@@ -43,6 +45,16 @@ interface Row {
   // Set when this session has a parent that isn't currently loaded in the
   // store; it's rendered as a root but we still hint at the missing parent.
   orphanParent: string | null;
+}
+
+interface SessionDialogPlugin {
+  definition: PluginDefinition;
+  instance: PluginInstance;
+}
+
+interface OpenPluginDialog {
+  sessionId: string;
+  plugin: SessionDialogPlugin;
 }
 
 // Flatten the sessions into a depth-first list ordered as a parent -> child
@@ -106,6 +118,9 @@ export default function SessionDashboard() {
   const closeSession = useStore((s) => s.closeSession);
   const renameSession = useStore((s) => s.renameSession);
   const hydrateSessions = useStore((s) => s.hydrateSessions);
+  const pluginCatalog = usePluginStore((s) => s.catalog);
+  const pluginInstances = usePluginStore((s) => s.instances);
+  const loadPlugins = usePluginStore((s) => s.loadPlugins);
   const navigate = useNavigate();
 
   // agent_id -> display name. Sessions only carry the agent UUID, so we fetch
@@ -115,10 +130,15 @@ export default function SessionDashboard() {
   // Which session's title is being edited inline, and the draft text.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [openPluginDialog, setOpenPluginDialog] = useState<OpenPluginDialog | null>(null);
+  const [openMoreForSession, setOpenMoreForSession] = useState<string | null>(null);
 
   useEffect(() => {
     hydrateSessions().catch((err) =>
       console.error("failed to hydrate sessions", err),
+    );
+    loadPlugins().catch((err) =>
+      console.error("failed to load plugins", err),
     );
     api.agents
       .list()
@@ -126,7 +146,7 @@ export default function SessionDashboard() {
         setAgentNames(Object.fromEntries(agents.map((a) => [a.id, a.name]))),
       )
       .catch((err) => console.error("failed to load agents", err));
-  }, [hydrateSessions]);
+  }, [hydrateSessions, loadPlugins]);
 
   const commitRename = (sessionId: string) => {
     const title = draftTitle.trim();
@@ -137,6 +157,17 @@ export default function SessionDashboard() {
       console.error("failed to rename session", err),
     );
   };
+
+  const sessionDialogPlugins = useMemo<SessionDialogPlugin[]>(() => {
+    const definitionsById = new Map(pluginCatalog.map((definition) => [definition.id, definition]));
+    return Object.values(pluginInstances)
+      .filter((instance) => instance.status === "running")
+      .map((instance) => {
+        const definition = definitionsById.get(instance.plugin_id);
+        return definition?.has_session_dialog ? { definition, instance } : null;
+      })
+      .filter((item): item is SessionDialogPlugin => item !== null);
+  }, [pluginCatalog, pluginInstances]);
 
   const entries: Entry[] = Object.values(sessions).map((e) => ({
     session: e.session,
@@ -167,6 +198,14 @@ export default function SessionDashboard() {
   return (
     <div className="p-6 flex flex-col min-h-0 flex-1">
       <h1 className="text-2xl font-semibold text-white mb-6 shrink-0">Sessions</h1>
+      {openPluginDialog && (
+        <PluginSessionConsoleDialog
+          sessionId={openPluginDialog.sessionId}
+          plugin={openPluginDialog.plugin.definition}
+          instance={openPluginDialog.plugin.instance}
+          onClose={() => setOpenPluginDialog(null)}
+        />
+      )}
       <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full min-w-[56rem] text-sm text-left">
           <thead className="sticky top-0 z-10 bg-gray-950">
@@ -279,7 +318,7 @@ export default function SessionDashboard() {
                 <td className="py-3 pr-4 text-gray-400 text-xs whitespace-nowrap">
                   {formatTimestamp(session.last_message_at)}
                 </td>
-                <td className="py-3 flex gap-2">
+                <td className="py-3 flex gap-2 relative">
                   <button
                     onClick={() => openSession(session.id)}
                     className="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white text-xs transition-colors"
@@ -292,6 +331,38 @@ export default function SessionDashboard() {
                   >
                     Close
                   </button>
+                  {sessionDialogPlugins.length > 0 && (
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMoreForSession((current) =>
+                            current === session.id ? null : session.id,
+                          );
+                        }}
+                        className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white text-xs transition-colors"
+                      >
+                        More
+                      </button>
+                      {openMoreForSession === session.id && (
+                        <div className="absolute right-0 top-8 z-20 min-w-40 overflow-hidden rounded-lg border border-gray-700 bg-gray-900 shadow-xl">
+                          {sessionDialogPlugins.map((plugin) => (
+                            <button
+                              key={plugin.instance.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMoreForSession(null);
+                                setOpenPluginDialog({ sessionId: session.id, plugin });
+                              }}
+                              className="block w-full px-3 py-2 text-left text-xs text-gray-200 hover:bg-gray-800"
+                            >
+                              {plugin.definition.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
               );

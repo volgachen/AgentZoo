@@ -31,6 +31,12 @@ class UpdatePluginInstanceRequest(BaseModel):
     auto_start: bool | None = None
 
 
+class PluginCommandRequest(BaseModel):
+    command: str = Field(min_length=1, max_length=300)
+    data: dict = Field(default_factory=dict)
+    timeout_ms: int = Field(default=10000, ge=100, le=60000)
+
+
 @router.get("/catalog", response_model=list[PluginDefinition])
 async def list_plugin_catalog(
     catalog: PluginCatalog = Depends(get_plugin_catalog),
@@ -160,6 +166,30 @@ async def stop_plugin_instance(
     return await db.get_plugin_instance(instance_id)
 
 
+@router.post("/instances/{instance_id}/commands")
+async def send_plugin_command(
+    instance_id: str,
+    body: PluginCommandRequest,
+    db: IAgentDatabase = Depends(get_db),
+    registry: PluginRunnerRegistry = Depends(get_plugin_registry),
+):
+    try:
+        await db.get_plugin_instance(instance_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    runner = registry.get(instance_id)
+    if runner is None:
+        raise HTTPException(status_code=409, detail="plugin instance is not running")
+    try:
+        return await runner.send_command(
+            command=body.command,
+            data=body.data,
+            timeout=body.timeout_ms / 1000,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @router.post("/instances/{instance_id}/restart", response_model=PluginRun)
 async def restart_plugin_instance(
     instance_id: str,
@@ -204,26 +234,28 @@ async def get_plugin_run(run_id: str, db: IAgentDatabase = Depends(get_db)):
 async def get_plugin_run_logs(
     run_id: str,
     limit: int = Query(default=500, ge=1, le=5000),
+    session_id: str | None = Query(default=None),
     db: IAgentDatabase = Depends(get_db),
 ):
     try:
         await db.get_plugin_run(run_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return await db.list_plugin_logs(plugin_run_id=run_id, limit=limit)
+    return await db.list_plugin_logs(plugin_run_id=run_id, session_id=session_id, limit=limit)
 
 
 @router.get("/instances/{instance_id}/logs", response_model=list[PluginLog])
 async def get_plugin_instance_logs(
     instance_id: str,
     limit: int = Query(default=500, ge=1, le=5000),
+    session_id: str | None = Query(default=None),
     db: IAgentDatabase = Depends(get_db),
 ):
     try:
         await db.get_plugin_instance(instance_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return await db.list_plugin_logs(plugin_instance_id=instance_id, limit=limit)
+    return await db.list_plugin_logs(plugin_instance_id=instance_id, session_id=session_id, limit=limit)
 
 
 @router.websocket("/instances/{instance_id}/stream")

@@ -110,12 +110,14 @@ CREATE TABLE IF NOT EXISTS plugin_logs (
     id                  BIGINT        AUTO_INCREMENT PRIMARY KEY,
     plugin_instance_id  VARCHAR(36)   NOT NULL,
     plugin_run_id       VARCHAR(36)   NOT NULL,
+    session_id          VARCHAR(36)   DEFAULT NULL,
     ts                  DATETIME(3)   NOT NULL,
     stream              VARCHAR(20)   NOT NULL,
     level               VARCHAR(20)   DEFAULT NULL,
     line                TEXT          NOT NULL,
     INDEX idx_plugin_logs_run_ts (plugin_run_id, ts),
     INDEX idx_plugin_logs_instance_ts (plugin_instance_id, ts),
+    INDEX idx_plugin_logs_session_ts (session_id, ts),
     INDEX idx_plugin_logs_stream (stream),
     FOREIGN KEY (plugin_instance_id) REFERENCES plugin_instances(id) ON DELETE CASCADE,
     FOREIGN KEY (plugin_run_id) REFERENCES plugin_runs(id) ON DELETE CASCADE
@@ -185,6 +187,14 @@ _COLUMN_MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "messages",
         "deleted_at",
         ["ALTER TABLE messages ADD COLUMN deleted_at DATETIME(3) DEFAULT NULL AFTER created_at"],
+    ),
+    (
+        "plugin_logs",
+        "session_id",
+        [
+            "ALTER TABLE plugin_logs ADD COLUMN session_id VARCHAR(36) DEFAULT NULL AFTER plugin_run_id",
+            "ALTER TABLE plugin_logs ADD INDEX idx_plugin_logs_session_ts (session_id, ts)",
+        ],
     ),
 ]
 
@@ -294,6 +304,7 @@ def _row_to_plugin_log(row: dict[str, Any]) -> PluginLog:
         id=row["id"],
         plugin_instance_id=row["plugin_instance_id"],
         plugin_run_id=row["plugin_run_id"],
+        session_id=row.get("session_id"),
         ts=row["ts"],
         stream=row["stream"],
         level=row.get("level"),
@@ -917,10 +928,12 @@ class MySqlDatabase(IAgentDatabase):
         line: str,
         *,
         level: str | None = None,
+        session_id: str | None = None,
     ) -> PluginLog:
         log = PluginLog(
             plugin_instance_id=plugin_instance_id,
             plugin_run_id=plugin_run_id,
+            session_id=session_id,
             stream=stream,
             level=level,
             line=line,
@@ -929,11 +942,12 @@ class MySqlDatabase(IAgentDatabase):
             async with conn.cursor() as cur:
                 await cur.execute(
                     """INSERT INTO plugin_logs
-                       (plugin_instance_id, plugin_run_id, ts, stream, level, line)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                       (plugin_instance_id, plugin_run_id, session_id, ts, stream, level, line)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                     (
                         log.plugin_instance_id,
                         log.plugin_run_id,
+                        log.session_id,
                         log.ts,
                         log.stream,
                         log.level,
@@ -948,6 +962,7 @@ class MySqlDatabase(IAgentDatabase):
         *,
         plugin_instance_id: str | None = None,
         plugin_run_id: str | None = None,
+        session_id: str | None = None,
         limit: int = 500,
     ) -> list[PluginLog]:
         clauses: list[str] = []
@@ -958,6 +973,9 @@ class MySqlDatabase(IAgentDatabase):
         if plugin_run_id is not None:
             clauses.append("plugin_run_id = %s")
             values.append(plugin_run_id)
+        if session_id is not None:
+            clauses.append("session_id = %s")
+            values.append(session_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         values.append(limit)
         async with self._pool.acquire() as conn:

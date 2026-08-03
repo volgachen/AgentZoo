@@ -28,6 +28,7 @@ class PluginDefinition(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     version: str = "0.0.0"
     scope: PluginScope = "system_side"
+    has_session_dialog: bool = False
     provider: str = "augentia"
     description: str = ""
     entry: PluginEntry

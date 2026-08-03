@@ -3,6 +3,7 @@
   "name": "WeChat Bridge",
   "version": "0.1.0",
   "scope": "system_side",
+  "has_session_dialog": true,
   "provider": "augentia",
   "description": "Forward messages between WeChat and Augentia sessions using the wechatbot.WeChatBot runtime.",
   "entry": {
