@@ -115,6 +115,8 @@ class PluginRunner:
                     "AUGENTIA_PLUGIN_RUN_ID": run.id,
                     "AUGENTIA_PLUGIN_ROOT": str(root),
                     "AUGENTIA_PLUGIN_CONFIG": json.dumps(instance.config or {}, ensure_ascii=False),
+                    "PYTHONIOENCODING": "utf-8",
+                    "PYTHONUTF8": "1",
                 })
                 self._proc = await asyncio.create_subprocess_exec(
                     sys.executable,

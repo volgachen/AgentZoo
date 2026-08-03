@@ -103,7 +103,7 @@ class AugentiaHost:
                 "source": source,
             },
         }
-        print(json.dumps(action, ensure_ascii=False), flush=True)
+        print(json.dumps(action), flush=True)
 
 
 def plain_text_content(content: Any) -> str | None:
@@ -227,7 +227,7 @@ class WeChatBridgePlugin:
                 "line": line,
             },
         }
-        print(json.dumps(frame, ensure_ascii=False), flush=True)
+        print(json.dumps(frame), flush=True)
 
     def _session_state(self, session_id: str) -> SessionBotState:
         state = self._session_states.get(session_id)
@@ -271,7 +271,7 @@ class WeChatBridgePlugin:
         def on_qr_url(qr_url: str) -> None:
             state.status = "Waiting QR Login"
             state.qr_url = qr_url
-            state.message = f'请点击 <a href="{qr_url}">这里</a> 扫码登录。'
+            state.message = f'请点击 <a href="{qr_url}">{qr_url}</a> 扫码登录。'
             self.emit_session_log(session_id, f"QR login required: {qr_url}")
 
         def on_scanned() -> None:
@@ -356,7 +356,7 @@ class WeChatBridgePlugin:
                 "ok": False,
                 "error": "session_id is required",
             }
-            print(json.dumps(response, ensure_ascii=False), flush=True)
+            print(json.dumps(response), flush=True)
             return
 
         if command == "session_dialog.status":
@@ -402,7 +402,7 @@ class WeChatBridgePlugin:
                 "ok": False,
                 "error": f"unsupported command: {command}",
             }
-        print(json.dumps(response, ensure_ascii=False), flush=True)
+        print(json.dumps(response), flush=True)
 
     async def on_augentia_message_created(self, event: dict[str, Any]) -> None:
         """Handle Augentia message.created events from stdin."""
