@@ -1,7 +1,13 @@
-import { useEffect, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store/sessions";
-import { useToastStore, type AppToast } from "../store/toasts";
+import {
+  getBrowserNotificationPermission,
+  requestBrowserNotificationPermission,
+  useToastStore,
+  type AppToast,
+  type BrowserNotificationPermission,
+} from "../store/toasts";
 
 function formatToolDetail(toast: AppToast): string {
   if (!toast.confirm) return "";
@@ -15,6 +21,8 @@ function ToastCard({ toast }: { toast: AppToast }) {
   const setActiveSession = useStore((s) => s.setActiveSession);
   const resolveConfirm = useStore((s) => s.resolveConfirm);
   const dismissToast = useToastStore((s) => s.dismissToast);
+  const [notificationPermission, setNotificationPermission] =
+    useState<BrowserNotificationPermission>(() => getBrowserNotificationPermission());
 
   useEffect(() => {
     const timer = window.setTimeout(() => dismissToast(toast.id), TOAST_TTL_MS);
@@ -39,7 +47,14 @@ function ToastCard({ toast }: { toast: AppToast }) {
     dismissToast(toast.id);
   };
 
+  const enableBrowserNotifications = async (e: MouseEvent) => {
+    e.stopPropagation();
+    const nextPermission = await requestBrowserNotificationPermission();
+    setNotificationPermission(nextPermission);
+  };
+
   const isConfirm = toast.status === "WAITING_CONFIRM";
+  const canRequestBrowserNotifications = notificationPermission === "default";
 
   return (
     <div
@@ -78,20 +93,31 @@ function ToastCard({ toast }: { toast: AppToast }) {
         </button>
       </div>
 
-      {toast.confirm && (
-        <div className="mt-3 flex justify-end">
-          <div className="group relative">
+      {(canRequestBrowserNotifications || toast.confirm) && (
+        <div className="mt-3 flex justify-end gap-2">
+          {canRequestBrowserNotifications && (
             <button
               type="button"
-              onClick={approve}
-              className="rounded-md bg-green-700 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-green-600"
+              onClick={enableBrowserNotifications}
+              className="rounded-md border border-gray-600 px-3 py-1 text-xs font-medium text-gray-100 transition-colors hover:bg-gray-800"
             >
-              同意执行
+              启用系统通知
             </button>
-            <pre className="absolute bottom-full right-0 z-50 mb-2 hidden max-h-64 w-[32rem] max-w-[calc(100vw-2rem)] overflow-auto rounded-lg border border-gray-700 bg-gray-950 p-3 font-mono text-xs text-gray-200 shadow-xl whitespace-pre-wrap break-all group-hover:block">
-              {formatToolDetail(toast)}
-            </pre>
-          </div>
+          )}
+          {toast.confirm && (
+            <div className="group relative">
+              <button
+                type="button"
+                onClick={approve}
+                className="rounded-md bg-green-700 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-green-600"
+              >
+                同意执行
+              </button>
+              <pre className="absolute bottom-full right-0 z-50 mb-2 hidden max-h-64 w-[32rem] max-w-[calc(100vw-2rem)] overflow-auto rounded-lg border border-gray-700 bg-gray-950 p-3 font-mono text-xs text-gray-200 shadow-xl whitespace-pre-wrap break-all group-hover:block">
+                {formatToolDetail(toast)}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>
