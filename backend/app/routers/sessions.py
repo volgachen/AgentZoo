@@ -18,7 +18,7 @@ from app.adapters.claude_code import ClaudeCodeAdapter
 from app.adapters.openai_tool_use import OpenAIToolUseAdapter
 from app.core.runner import SessionRunner
 from app.core.session_config import ensure_session_config, write_session_config
-from app.adapters.tools.permissions import validate_tool_permissions_config
+from app.adapters.tools.permissions import explain_tool_permission, validate_tool_permissions_config
 
 logger = logging.getLogger("augentia.sessions")
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -58,6 +58,12 @@ class UpdateSessionRequest(BaseModel):
 
 class UpdateSessionConfigRequest(BaseModel):
     config: dict
+
+
+class TestToolPermissionRequest(BaseModel):
+    tool: str
+    path: str | None = None
+    args: dict | None = None
 
 
 class PostMessageRequest(BaseModel):
@@ -374,6 +380,40 @@ async def update_session_config(
     if runner is not None:
         await runner.reload_config(config)
     return config
+
+
+@router.post("/{session_id}/tool-permissions/test")
+async def test_tool_permission(
+    session_id: str,
+    body: TestToolPermissionRequest,
+    db: IAgentDatabase = Depends(get_db),
+):
+    try:
+        session = await db.get_session(session_id)
+        agent = await db.get_agent(session.agent_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    config = ensure_session_config(session_id, agent.config)
+    args = dict(body.args or {})
+    if body.path is not None:
+        if body.tool == "read":
+            args.setdefault("path", body.path)
+        else:
+            args.setdefault("file_path", body.path)
+    explanation = explain_tool_permission(body.tool, args, session.working_dir, config)
+    if explanation is None:
+        return {
+            "action": "ask",
+            "reason": "tool is not covered by tool_permissions; using legacy approval policy",
+            "rule_id": None,
+            "resolved_path": None,
+        }
+    return {
+        "action": explanation.action,
+        "reason": explanation.reason,
+        "rule_id": explanation.rule_id,
+        "resolved_path": explanation.resolved_path,
+    }
 
 
 @router.get("/{session_id}/messages")

@@ -17,6 +17,12 @@ const DEFAULT_TOOL_PERMISSIONS = {
       tool: "*",
       paths: ["./.env", "./.env.*", "./secrets/**", "./.git/**"],
     },
+    {
+      id: "allow-safe-bash",
+      effect: "allow",
+      tool: "bash",
+      commands: ["rg *", "git status", "git diff *"],
+    },
   ],
 };
 
@@ -35,6 +41,15 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [testTool, setTestTool] = useState("edit");
+  const [testPath, setTestPath] = useState("./README.md");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    action: "allow" | "deny" | "ask";
+    reason: string;
+    rule_id: string | null;
+    resolved_path: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +104,25 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
     setSaved(false);
   };
 
+  const handleTest = async () => {
+    const path = testPath.trim();
+    if (!path) return;
+    setTesting(true);
+    setError(null);
+    setTestResult(null);
+    try {
+      const result = await api.sessions.testToolPermission(session.id, {
+        tool: testTool,
+        path,
+      });
+      setTestResult(result);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <section className="flex-1 flex flex-col min-h-0">
       <div className="shrink-0 flex items-center justify-between px-2 pb-1.5">
@@ -119,17 +153,6 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
             }}
           />
 
-          {error && (
-            <div className="mt-2 rounded border border-red-800 bg-red-950/50 px-2 py-1.5 text-[11px] leading-4 text-red-200">
-              {error}
-            </div>
-          )}
-          {saved && !error && (
-            <div className="mt-2 rounded border border-green-800 bg-green-950/40 px-2 py-1.5 text-[11px] text-green-200">
-              Saved and applied to this session.
-            </div>
-          )}
-
           <div className="mt-2 flex justify-end gap-2">
             <button
               type="button"
@@ -148,6 +171,58 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
               {saving ? "Saving…" : "Save"}
             </button>
           </div>
+
+          <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/60 p-2">
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              Test rule
+            </div>
+            <div className="flex gap-1.5">
+              <select
+                className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-200 outline-none focus:border-indigo-500"
+                value={testTool}
+                onChange={(e) => setTestTool(e.target.value)}
+              >
+                <option value="read">read</option>
+                <option value="write">write</option>
+                <option value="edit">edit</option>
+              </select>
+              <input
+                className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-900 px-2 py-1 font-mono text-xs text-gray-200 outline-none focus:border-indigo-500"
+                value={testPath}
+                onChange={(e) => setTestPath(e.target.value)}
+                placeholder="./src/file.ts"
+              />
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing || !testPath.trim()}
+                className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+              >
+                {testing ? "Testing…" : "Test"}
+              </button>
+            </div>
+            {testResult && (
+              <div className="mt-2 space-y-0.5 rounded border border-gray-800 bg-gray-900 px-2 py-1.5 font-mono text-[11px] leading-4 text-gray-300">
+                <div>
+                  action: <span className={testResult.action === "allow" ? "text-green-300" : testResult.action === "deny" ? "text-red-300" : "text-orange-300"}>{testResult.action}</span>
+                </div>
+                <div>reason: {testResult.reason}</div>
+                <div>rule: {testResult.rule_id ?? "—"}</div>
+                <div className="break-all">resolved: {testResult.resolved_path ?? "—"}</div>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="mt-2 rounded border border-red-800 bg-red-950/50 px-2 py-1.5 text-[11px] leading-4 text-red-200">
+              {error}
+            </div>
+          )}
+          {saved && !error && (
+            <div className="mt-2 rounded border border-green-800 bg-green-950/40 px-2 py-1.5 text-[11px] text-green-200">
+              Saved and applied to this session.
+            </div>
+          )}
         </>
       )}
     </section>

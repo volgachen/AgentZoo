@@ -21,6 +21,12 @@ _DEFAULT_TOOL_PERMISSIONS = {
             "tool": "*",
             "paths": ["./.env", "./.env.*", "./secrets/**", "./.git/**"],
         },
+        {
+            "id": "allow-safe-bash",
+            "effect": "allow",
+            "tool": "bash",
+            "commands": ["rg *", "git status", "git diff *"],
+        },
     ],
 }
 

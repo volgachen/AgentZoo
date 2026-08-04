@@ -138,6 +138,16 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ config }),
       }),
+    testToolPermission: (id: string, body: { tool: string; path?: string | null; args?: Record<string, unknown> }) =>
+      request<{
+        action: "allow" | "deny" | "ask";
+        reason: string;
+        rule_id: string | null;
+        resolved_path: string | null;
+      }>(`/sessions/${id}/tool-permissions/test`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),
     retryMessage: (id: string, messageId: string, content: string) =>
       request<{ status: string }>(`/sessions/${id}/messages/${messageId}/retry`, {

@@ -37,6 +37,18 @@ def main() -> int:
                         "tool": "*",
                         "paths": ["./.env", "./secrets/**"],
                     },
+                    {
+                        "id": "allow-safe-bash",
+                        "effect": "allow",
+                        "tool": "bash",
+                        "commands": ["rg *", {"program": "git", "args": ["status"]}],
+                    },
+                    {
+                        "id": "deny-git-push",
+                        "effect": "deny",
+                        "tool": "bash",
+                        "commands": [{"program": "git", "args": ["push", "*"]}],
+                    },
                 ],
             }
         }
@@ -48,8 +60,10 @@ def main() -> int:
         assert_decision("deny", "edit", {"file_path": "docs/../.env"}, str(root), config)
         assert_decision("ask", "write", {"file_path": "notes/a.md"}, str(root), config)
 
-        bash_decision = decide_tool_permission("bash", {"command": "git status"}, str(root), config)
-        assert bash_decision is None, f"bash should fall back to legacy flow, got {bash_decision}"
+        assert_decision("allow", "bash", {"command": "git status"}, str(root), config)
+        assert_decision("allow", "bash", {"command": "rg foo backend"}, str(root), config)
+        assert_decision("deny", "bash", {"command": "git push origin main"}, str(root), config)
+        assert_decision("ask", "bash", {"command": "git status && git push"}, str(root), config)
 
     print("tool permission checks OK")
     return 0
