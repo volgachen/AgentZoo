@@ -249,8 +249,7 @@ class WeChatBridgePlugin:
         return data
 
     def _cred_path(self, session_id: str) -> str:
-        root = Path(os.getenv("AUGENTIA_PLUGIN_ROOT") or ".")
-        return str(root / ".state" / "sessions" / session_id / "credentials.json")
+        return str(Path.home() / ".augentia" / "sessions" / session_id / "wechat_credentials.json")
 
     async def _connect_session(self, session_id: str) -> SessionBotState:
         state = self._session_state(session_id)
