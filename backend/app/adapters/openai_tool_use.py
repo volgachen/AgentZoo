@@ -453,6 +453,13 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
             except Exception:
                 logger.exception("tool aclose failed: %s", t.name)
 
+    def current_system_prompt(self) -> str | None:
+        for message in self._messages:
+            if message.get("role") == "system":
+                content = message.get("content")
+                return content if isinstance(content, str) else None
+        return None
+
     @property
     def context_tokens(self) -> int:
         """Token footprint of the conversation as of the last completed turn.

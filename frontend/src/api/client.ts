@@ -132,6 +132,8 @@ export const api = {
       }),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     list: () => request<Session[]>("/sessions"),
+    systemPrompt: (id: string) =>
+      request<{ system_prompt: string; source?: string }>(`/sessions/${id}/system-prompt`),
     config: (id: string) => request<Record<string, unknown>>(`/sessions/${id}/config`),
     updateConfig: (id: string, config: Record<string, unknown>) =>
       request<Record<string, unknown>>(`/sessions/${id}/config`, {

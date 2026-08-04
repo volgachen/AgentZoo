@@ -75,6 +75,24 @@ class RetryMessageRequest(BaseModel):
     content: str
 
 
+def _effective_system_prompt(
+    agent: AgentTemplate,
+    additional_prompt: str | None = None,
+    additional_prompt_path: str | None = None,
+) -> str:
+    system_prompt = agent.system_prompt
+    if additional_prompt:
+        system_prompt = system_prompt + "\n\n" + additional_prompt
+    if additional_prompt_path:
+        try:
+            extra_content = Path(additional_prompt_path).read_text(encoding="utf-8")
+            system_prompt = system_prompt + "\n\n" + extra_content
+        except (OSError, UnicodeDecodeError) as e:
+            logger.exception("failed to read additional_prompt_path=%s", additional_prompt_path)
+            raise ValueError(f"failed to read additional system prompt from {additional_prompt_path}: {e}")
+    return system_prompt
+
+
 async def _build_runner(
     session: Session,
     agent: AgentTemplate,
@@ -103,18 +121,7 @@ async def _build_runner(
     else:
         raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
 
-    # Build the final system prompt by appending additional content
-    system_prompt = agent.system_prompt
-    if additional_prompt:
-        system_prompt = system_prompt + "\n\n" + additional_prompt
-    if additional_prompt_path:
-        try:
-            extra_content = Path(additional_prompt_path).read_text(encoding="utf-8")
-            system_prompt = system_prompt + "\n\n" + extra_content
-        except (OSError, UnicodeDecodeError) as e:
-            logger.exception("failed to read additional_prompt_path=%s", additional_prompt_path)
-            raise ValueError(f"failed to read additional system prompt from {additional_prompt_path}: {e}")
-
+    system_prompt = _effective_system_prompt(agent, additional_prompt, additional_prompt_path)
     await adapter.start(system_prompt)
 
     # Rebuild prior context so a session rehydrated after a restart isn't
@@ -339,6 +346,36 @@ async def rename_session(
         return await db.update_session_title(session_id, title)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{session_id}/system-prompt")
+async def get_session_system_prompt(
+    session_id: str,
+    db: IAgentDatabase = Depends(get_db),
+    registry: AdapterRegistry = Depends(get_registry),
+):
+    try:
+        session = await db.get_session(session_id)
+        agent = await db.get_agent(session.agent_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        runner = registry.get(session_id)
+    except KeyError:
+        runner = None
+    if runner is not None:
+        prompt = runner.current_system_prompt()
+        if prompt is not None:
+            return {"system_prompt": prompt, "source": "live_adapter"}
+    try:
+        prompt = _effective_system_prompt(
+            agent,
+            session.additional_prompt,
+            session.additional_prompt_path,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"system_prompt": prompt, "source": "recomputed"}
 
 
 @router.get("/{session_id}/config")

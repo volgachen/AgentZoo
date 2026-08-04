@@ -93,6 +93,10 @@ class BaseAgentAdapter(ABC):
         """
         return
 
+    def current_system_prompt(self) -> str | None:
+        """Return the live in-memory system prompt, when the adapter exposes one."""
+        return None
+
     @property
     @abstractmethod
     def is_alive(self) -> bool:

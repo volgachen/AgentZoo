@@ -6,6 +6,7 @@ import TaskListPanel from "../components/TaskListPanel";
 import SubAgentListPanel from "../components/SubAgentListPanel";
 import ToolConfirmPanel from "../components/ToolConfirmPanel";
 import ToolPermissionsPanel from "../components/ToolPermissionsPanel";
+import SystemPromptPanel from "../components/SystemPromptPanel";
 import ToolPreview from "../components/ToolPreview";
 
 const EVENT_STYLE: Record<string, string> = {
@@ -342,7 +343,7 @@ export default function LiveConsole() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [focusedItemIndex, setFocusedItemIndex] = useState<number | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<"overview" | "permissions">("overview");
+  const [sidebarTab, setSidebarTab] = useState<"overview" | "permissions" | "systemPrompt">("overview");
 
   const entry = sessionId ? sessions[sessionId] : undefined;
 
@@ -552,6 +553,7 @@ export default function LiveConsole() {
             {[
               ["overview", "Overview"],
               ["permissions", "Tool Permissions"],
+              ["systemPrompt", "System Prompt"],
             ].map(([key, label]) => (
               <button
                 key={key}
@@ -582,6 +584,7 @@ export default function LiveConsole() {
               </div>
             )}
             {sidebarTab === "permissions" && <ToolPermissionsPanel session={session} />}
+            {sidebarTab === "systemPrompt" && <SystemPromptPanel session={session} />}
           </div>
         </aside>
       </div>

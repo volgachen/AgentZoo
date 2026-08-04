@@ -92,6 +92,9 @@ class SessionRunner:
     async def reload_config(self, config: dict) -> None:
         await self._adapter.reload_config(config)
 
+    def current_system_prompt(self) -> str | None:
+        return self._adapter.current_system_prompt()
+
     def _remember_confirm(self, event: StreamEvent) -> None:
         # event.data is JSON: {"call_id", "name", "args"}. Key the cache by
         # call_id so a resolved/expired confirm can be dropped individually.
