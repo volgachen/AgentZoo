@@ -11,6 +11,10 @@ class Settings:
         self.mysql_password: str = os.getenv("MYSQL_PASSWORD", "")
         self.mysql_database: str = os.getenv("MYSQL_DATABASE", "augentia")
         self.sqlite_path: str = os.getenv("SQLITE_PATH", ".local/augentia.db")
+        self.augentia_home: str = os.getenv(
+            "AUGENTIA_HOME",
+            os.path.join(os.path.expanduser("~"), ".augentia"),
+        )
         self.worktree_root: str = os.getenv(
             "AUGENTIA_WORKTREE_ROOT",
             os.path.join(os.path.expanduser("~"), ".augentia", "worktrees"),

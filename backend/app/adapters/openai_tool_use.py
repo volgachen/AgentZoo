@@ -428,6 +428,15 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                 self._pending_confirms[call_id] = (fut, supplementary_msg)
                 fut.set_result(approved)
 
+    async def reload_config(self, config: dict) -> None:
+        self._config = config or {}
+        self._approval_overrides = dict(self._config.get("tool_approvals", {}))
+        self._requires_approval = {
+            t.name: self._approval_overrides.get(t.name, t.requires_approval)
+            for t in self._tools
+        }
+        logger.info("reloaded session config tools=%s", list(self._requires_approval))
+
     async def stop(self) -> None:
         self._alive = False
         self._client = None

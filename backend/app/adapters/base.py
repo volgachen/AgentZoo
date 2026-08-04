@@ -85,6 +85,14 @@ class BaseAgentAdapter(ABC):
         """
         return
 
+    async def reload_config(self, config: dict) -> None:
+        """Apply updated per-session runtime config without restarting the adapter.
+
+        Default is a no-op; adapters that use config during tool execution can
+        override it so UI changes take effect for the current live session.
+        """
+        return
+
     @property
     @abstractmethod
     def is_alive(self) -> bool:

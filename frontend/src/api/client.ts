@@ -132,6 +132,12 @@ export const api = {
       }),
     get: (id: string) => request<Session>(`/sessions/${id}`),
     list: () => request<Session[]>("/sessions"),
+    config: (id: string) => request<Record<string, unknown>>(`/sessions/${id}/config`),
+    updateConfig: (id: string, config: Record<string, unknown>) =>
+      request<Record<string, unknown>>(`/sessions/${id}/config`, {
+        method: "PUT",
+        body: JSON.stringify({ config }),
+      }),
     messages: (id: string) => request<Message[]>(`/sessions/${id}/messages`),
     retryMessage: (id: string, messageId: string, content: string) =>
       request<{ status: string }>(`/sessions/${id}/messages/${messageId}/retry`, {

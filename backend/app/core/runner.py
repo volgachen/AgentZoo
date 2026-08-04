@@ -89,6 +89,9 @@ class SessionRunner:
         self._pending_confirms.pop(call_id, None)
         await self._adapter.resolve_decision(call_id, approved, supplementary_msg)
 
+    async def reload_config(self, config: dict) -> None:
+        await self._adapter.reload_config(config)
+
     def _remember_confirm(self, event: StreamEvent) -> None:
         # event.data is JSON: {"call_id", "name", "args"}. Key the cache by
         # call_id so a resolved/expired confirm can be dropped individually.

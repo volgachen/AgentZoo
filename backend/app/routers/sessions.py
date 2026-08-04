@@ -17,6 +17,8 @@ from app.adapters.registry import AdapterRegistry, get_registry
 from app.adapters.claude_code import ClaudeCodeAdapter
 from app.adapters.openai_tool_use import OpenAIToolUseAdapter
 from app.core.runner import SessionRunner
+from app.core.session_config import ensure_session_config, write_session_config
+from app.adapters.tools.permissions import validate_tool_permissions_config
 
 logger = logging.getLogger("augentia.sessions")
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -54,6 +56,10 @@ class UpdateSessionRequest(BaseModel):
     title: str
 
 
+class UpdateSessionConfigRequest(BaseModel):
+    config: dict
+
+
 class PostMessageRequest(BaseModel):
     content: str
     from_session_id: str | None = None
@@ -76,6 +82,7 @@ async def _build_runner(
     post-restart rehydration path (history restored from the DB). Raises
     ValueError/RuntimeError on adapter start failure; the caller decides how to
     surface that."""
+    session_config = ensure_session_config(session.id, agent.config)
     if agent.agent_type == AgentType.CLAUDE_CODE:
         adapter = ClaudeCodeAdapter(working_dir=session.working_dir, session_id=session.id)
     elif agent.agent_type == AgentType.TOOL_USE:
@@ -85,7 +92,7 @@ async def _build_runner(
             base_url=agent.openai_base_url,
             session_id=session.id,
             working_dir=session.working_dir,
-            config=agent.config,
+            config=session_config,
         )
     else:
         raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
@@ -326,6 +333,47 @@ async def rename_session(
         return await db.update_session_title(session_id, title)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{session_id}/config")
+async def get_session_config(
+    session_id: str,
+    db: IAgentDatabase = Depends(get_db),
+):
+    try:
+        session = await db.get_session(session_id)
+        agent = await db.get_agent(session.agent_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        return ensure_session_config(session_id, agent.config)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{session_id}/config")
+async def update_session_config(
+    session_id: str,
+    body: UpdateSessionConfigRequest,
+    db: IAgentDatabase = Depends(get_db),
+    registry: AdapterRegistry = Depends(get_registry),
+):
+    try:
+        session = await db.get_session(session_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        validate_tool_permissions_config(body.config.get("tool_permissions"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    config = write_session_config(session_id, body.config)
+    try:
+        runner = registry.get(session_id)
+    except KeyError:
+        runner = None
+    if runner is not None:
+        await runner.reload_config(config)
+    return config
 
 
 @router.get("/{session_id}/messages")

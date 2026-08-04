@@ -6,6 +6,7 @@ from app.db.deps import get_db
 from app.models.domain import AgentTemplate, AgentType
 import app.adapters.tools  # noqa: F401 — triggers tool registration
 from app.adapters.tools.registry import list_available
+from app.adapters.tools.permissions import validate_tool_permissions_config
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -55,76 +56,10 @@ def _validate_config(config: dict) -> None:
             status_code=400,
             detail=f"config.tool_approvals values must be booleans; got non-bool for: {bad}",
         )
-    _validate_tool_permissions_config(config.get("tool_permissions"))
-
-
-def _validate_tool_selector_item(
-    tool: object,
-    available: set[str],
-    supported: set[str],
-    field: str,
-) -> None:
-    if tool != "*" and tool not in available:
-        raise HTTPException(status_code=400, detail=f"{field} is unknown: {tool}")
-    if tool != "*" and tool not in supported:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field} is not supported by tool_permissions yet: {tool}",
-        )
-
-
-def _validate_tool_permissions_config(permissions: object) -> None:
-    if permissions is None:
-        return
-    if not isinstance(permissions, dict):
-        raise HTTPException(
-            status_code=400,
-            detail="config.tool_permissions must be an object",
-        )
-
-    default = permissions.get("default", "ask")
-    if default not in ("allow", "deny", "ask"):
-        raise HTTPException(
-            status_code=400,
-            detail="config.tool_permissions.default must be one of: allow, deny, ask",
-        )
-
-    rules = permissions.get("rules", [])
-    if not isinstance(rules, list):
-        raise HTTPException(
-            status_code=400,
-            detail="config.tool_permissions.rules must be an array",
-        )
-
-    available = set(list_available())
-    file_tools = {"read", "write", "edit"}
-    for index, rule in enumerate(rules):
-        prefix = f"config.tool_permissions.rules[{index}]"
-        if not isinstance(rule, dict):
-            raise HTTPException(status_code=400, detail=f"{prefix} must be an object")
-        effect = rule.get("effect")
-        if effect not in ("allow", "deny"):
-            raise HTTPException(status_code=400, detail=f"{prefix}.effect must be allow or deny")
-        tool = rule.get("tool")
-        tools = rule.get("tools")
-        if tool is None and tools is None:
-            raise HTTPException(status_code=400, detail=f"{prefix} must include tool or tools")
-        if tool is not None:
-            _validate_tool_selector_item(tool, available, file_tools, f"{prefix}.tool")
-        if tools is not None:
-            if not isinstance(tools, list) or not tools:
-                raise HTTPException(status_code=400, detail=f"{prefix}.tools must be a non-empty array")
-            for tool_index, item in enumerate(tools):
-                _validate_tool_selector_item(item, available, file_tools, f"{prefix}.tools[{tool_index}]")
-        paths = rule.get("paths")
-        if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
-            raise HTTPException(
-                status_code=400,
-                detail=f"{prefix}.paths must be a non-empty string array",
-            )
-        rule_id = rule.get("id")
-        if rule_id is not None and not isinstance(rule_id, str):
-            raise HTTPException(status_code=400, detail=f"{prefix}.id must be a string when present")
+    try:
+        validate_tool_permissions_config(config.get("tool_permissions"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("", response_model=List[AgentTemplate])

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { AgentTemplate, Session } from "../api/types";
+import type { Session } from "../api/types";
 
 const DEFAULT_TOOL_PERMISSIONS = {
   default: "ask",
@@ -24,8 +24,12 @@ function pretty(value: unknown): string {
   return JSON.stringify(value ?? DEFAULT_TOOL_PERMISSIONS, null, 2);
 }
 
+function permissionsFromConfig(config: Record<string, unknown> | null): unknown {
+  return config?.tool_permissions ?? DEFAULT_TOOL_PERMISSIONS;
+}
+
 export default function ToolPermissionsPanel({ session }: { session: Session }) {
-  const [agent, setAgent] = useState<AgentTemplate | null>(null);
+  const [sessionConfig, setSessionConfig] = useState<Record<string, unknown> | null>(null);
   const [draft, setDraft] = useState(pretty(DEFAULT_TOOL_PERMISSIONS));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -37,12 +41,12 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
     setLoading(true);
     setError(null);
     setSaved(false);
-    api.agents
-      .get(session.agent_id)
-      .then((nextAgent) => {
+    api.sessions
+      .config(session.id)
+      .then((config) => {
         if (cancelled) return;
-        setAgent(nextAgent);
-        setDraft(pretty(nextAgent.config?.tool_permissions ?? DEFAULT_TOOL_PERMISSIONS));
+        setSessionConfig(config);
+        setDraft(pretty(permissionsFromConfig(config)));
       })
       .catch((e) => {
         if (!cancelled) setError((e as Error).message);
@@ -53,10 +57,9 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
     return () => {
       cancelled = true;
     };
-  }, [session.agent_id]);
+  }, [session.id]);
 
   const handleSave = async () => {
-    if (!agent) return;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -66,12 +69,12 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
         throw new Error("tool_permissions must be a JSON object");
       }
       const nextConfig = {
-        ...(agent.config ?? {}),
+        ...(sessionConfig ?? { version: 1 }),
         tool_permissions: parsed,
       };
-      const updated = await api.agents.update(agent.id, { config: nextConfig });
-      setAgent(updated);
-      setDraft(pretty(updated.config?.tool_permissions ?? DEFAULT_TOOL_PERMISSIONS));
+      const updated = await api.sessions.updateConfig(session.id, nextConfig);
+      setSessionConfig(updated);
+      setDraft(pretty(permissionsFromConfig(updated)));
       setSaved(true);
     } catch (e) {
       setError((e as Error).message);
@@ -81,7 +84,7 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
   };
 
   const handleReset = () => {
-    setDraft(pretty(agent?.config?.tool_permissions ?? DEFAULT_TOOL_PERMISSIONS));
+    setDraft(pretty(permissionsFromConfig(sessionConfig)));
     setError(null);
     setSaved(false);
   };
@@ -92,20 +95,18 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
         <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
           Tool Permissions
         </h2>
-        {agent && (
-          <span className="text-[10px] text-gray-500 font-mono truncate max-w-[9rem]" title={agent.name}>
-            {agent.name}
-          </span>
-        )}
+        <span className="text-[10px] text-gray-500 font-mono truncate max-w-[9rem]" title={session.id}>
+          {session.id.slice(0, 8)}…
+        </span>
       </div>
 
       <div className="px-2 pb-2 text-[11px] leading-4 text-gray-500">
-        Saved on the agent template as <span className="font-mono text-gray-400">config.tool_permissions</span>.
-        New turns in this session use the updated config after the backend adapter is restarted or rehydrated.
+        Saved for this session in <span className="font-mono text-gray-400">$AUGENTIA_HOME/sessions/{session.id}/config.json</span>.
+        Saving applies to the current live adapter immediately.
       </div>
 
       {loading ? (
-        <p className="px-2 text-xs text-gray-600">Loading agent config…</p>
+        <p className="px-2 text-xs text-gray-600">Loading session config…</p>
       ) : (
         <>
           <textarea
@@ -125,7 +126,7 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
           )}
           {saved && !error && (
             <div className="mt-2 rounded border border-green-800 bg-green-950/40 px-2 py-1.5 text-[11px] text-green-200">
-              Saved.
+              Saved and applied to this session.
             </div>
           )}
 
@@ -141,7 +142,7 @@ export default function ToolPermissionsPanel({ session }: { session: Session }) 
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !agent}
+              disabled={saving}
               className="rounded bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save"}
