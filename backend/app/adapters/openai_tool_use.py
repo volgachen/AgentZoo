@@ -9,6 +9,7 @@ from app.models.domain import Message, MessageRole
 import app.adapters.tools  # noqa: F401 — triggers tool registration
 from app.adapters.tools.registry import load_tools
 from app.adapters.tools.base import BaseTool
+from app.adapters.tools.permissions import decide_tool_permission
 
 logger = logging.getLogger("augentia.adapter.tool_use")
 
@@ -31,9 +32,10 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
     ) -> None:
         super().__init__(session_id)
         self._tool_names = tool_names
+        self._config = config or {}
         # Per-agent tool approval overrides: {tool_name: requires_approval}. Merged
         # over each tool's class default at start() to build self._requires_approval.
-        self._approval_overrides: dict[str, bool] = dict((config or {}).get("tool_approvals", {}))
+        self._approval_overrides: dict[str, bool] = dict(self._config.get("tool_approvals", {}))
         # tool_name -> whether a human confirm is required; populated in start()
         # once the tools are loaded (so we know each tool's class-level default).
         self._requires_approval: dict[str, bool] = {}
@@ -302,34 +304,52 @@ class OpenAIToolUseAdapter(BaseAgentAdapter):
                     data=json.dumps({"call_id": tc.id, "name": fn_name, "args": fn_args}),
                 )
 
-                # Human-in-the-loop gate: any tool not on the auto-approve list
-                # blocks here until resolve_decision() sets this Future. The
-                # stream runs inside the runner's task, so awaiting is fine — the
-                # runner keeps fanning out our already-yielded events while we
-                # wait. stop() cancels the Future, which propagates as normal
-                # task cancellation.
+                # Permission gate: new-style config.tool_permissions can allow,
+                # deny, or ask for filesystem tools (read/write/edit). Tools or
+                # configs it does not cover fall back to the legacy boolean
+                # requires_approval/tool_approvals behavior.
                 denied = False
+                denied_by_policy = False
                 supplementary_msg = ""
-                # Default True (gate) for a tool with no resolved policy — e.g. an
-                # unknown tool name the model hallucinated; safer to ask.
-                if self._requires_approval.get(fn_name, True):
-                    fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-                    self._pending_confirms[tc.id] = (fut, "")
-                    yield StreamEvent(
-                        type=StreamEventType.TOOL_CONFIRM,
-                        data=json.dumps({"call_id": tc.id, "name": fn_name, "args": fn_args}),
+                permission = decide_tool_permission(fn_name, fn_args, self._working_dir, self._config)
+                if permission is not None:
+                    logger.info(
+                        "tool permission: tool=%s action=%s rule=%s reason=%s",
+                        fn_name, permission.action, permission.rule_id, permission.reason,
                     )
-                    try:
-                        approved = await fut
-                        # Retrieve the supplementary message set by resolve_decision
-                        _, supplementary_msg = self._pending_confirms.get(tc.id, (None, ""))
-                    finally:
-                        self._pending_confirms.pop(tc.id, None)
-                    denied = not approved
+
+                if permission is not None and permission.action == "deny":
+                    denied = True
+                    denied_by_policy = True
+                else:
+                    should_ask = (
+                        permission.action == "ask"
+                        if permission is not None
+                        else self._requires_approval.get(fn_name, True)
+                    )
+                    if should_ask:
+                        fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+                        self._pending_confirms[tc.id] = (fut, "")
+                        yield StreamEvent(
+                            type=StreamEventType.TOOL_CONFIRM,
+                            data=json.dumps({"call_id": tc.id, "name": fn_name, "args": fn_args}),
+                        )
+                        try:
+                            approved = await fut
+                            # Retrieve the supplementary message set by resolve_decision
+                            _, supplementary_msg = self._pending_confirms.get(tc.id, (None, ""))
+                        finally:
+                            self._pending_confirms.pop(tc.id, None)
+                        denied = not approved
 
                 if denied:
-                    result = "Error: user denied execution of this tool call."
-                    logger.info("tool %s denied by user", fn_name)
+                    if denied_by_policy:
+                        reason = permission.reason if permission is not None else "policy denied"
+                        result = f"Error: tool call denied by policy: {reason}"
+                        logger.info("tool %s denied by policy: %s", fn_name, reason)
+                    else:
+                        result = "Error: user denied execution of this tool call."
+                        logger.info("tool %s denied by user", fn_name)
                 else:
                     all_denied = False
                     tool = tool_map.get(fn_name)

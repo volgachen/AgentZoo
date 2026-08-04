@@ -5,6 +5,7 @@ import type { StreamEvent } from "../api/types";
 import TaskListPanel from "../components/TaskListPanel";
 import SubAgentListPanel from "../components/SubAgentListPanel";
 import ToolConfirmPanel from "../components/ToolConfirmPanel";
+import ToolPermissionsPanel from "../components/ToolPermissionsPanel";
 import ToolPreview from "../components/ToolPreview";
 
 const EVENT_STYLE: Record<string, string> = {
@@ -341,6 +342,7 @@ export default function LiveConsole() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [focusedItemIndex, setFocusedItemIndex] = useState<number | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<"overview" | "permissions">("overview");
 
   const entry = sessionId ? sessions[sessionId] : undefined;
 
@@ -544,16 +546,42 @@ export default function LiveConsole() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Status sidebar: tasks + sub-agents (hidden on narrow screens) */}
-        <aside className="hidden lg:flex w-80 shrink-0 flex-col gap-3 min-h-0">
-          <div className="flex-1 min-h-0 bg-gray-900 rounded-xl border border-gray-700 p-3 flex flex-col">
-            <TaskListPanel tasks={entry.tasks} />
+        {/* Status sidebar (hidden on narrow screens) */}
+        <aside className="hidden lg:flex w-80 shrink-0 flex-col min-h-0 bg-gray-900 rounded-xl border border-gray-700">
+          <div className="shrink-0 flex gap-1 border-b border-gray-800 p-2">
+            {[
+              ["overview", "Overview"],
+              ["permissions", "Tool Permissions"],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSidebarTab(key as typeof sidebarTab)}
+                className={`rounded px-2 py-1 text-[11px] font-medium ${
+                  sidebarTab === key
+                    ? "bg-indigo-600 text-white"
+                    : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <div className="flex-1 min-h-0 bg-gray-900 rounded-xl border border-gray-700 p-3 flex flex-col">
-            <SubAgentListPanel
-              agents={children}
-              onOpen={(id) => navigate(`/console/${id}`)}
-            />
+          <div className="flex-1 min-h-0 p-3 flex flex-col">
+            {sidebarTab === "overview" && (
+              <div className="flex-1 min-h-0 flex flex-col gap-3">
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <TaskListPanel tasks={entry.tasks} />
+                </div>
+                <div className="flex-1 min-h-0 flex flex-col border-t border-gray-800 pt-3">
+                  <SubAgentListPanel
+                    agents={children}
+                    onOpen={(id) => navigate(`/console/${id}`)}
+                  />
+                </div>
+              </div>
+            )}
+            {sidebarTab === "permissions" && <ToolPermissionsPanel session={session} />}
           </div>
         </aside>
       </div>

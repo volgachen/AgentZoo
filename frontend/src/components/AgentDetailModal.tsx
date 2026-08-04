@@ -18,6 +18,7 @@ const EMPTY: CreateAgentPayload = {
   system_prompt: "",
   tool_names: [],
   openai_model: "gpt-4o",
+  config: {},
   openai_base_url: null,
 };
 
@@ -42,6 +43,7 @@ export default function AgentDetailModal({ open, agent, onClose, onSaved }: Prop
             agent_type: agent.agent_type,
             system_prompt: agent.system_prompt,
             tool_names: agent.tool_names,
+            config: agent.config ?? {},
             openai_model: agent.openai_model,
             openai_base_url: agent.openai_base_url,
           }

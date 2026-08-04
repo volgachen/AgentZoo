@@ -59,6 +59,7 @@ export interface CreateAgentPayload {
   agent_type: AgentType;
   system_prompt: string;
   tool_names: string[];
+  config?: Record<string, unknown>;
   openai_model: string;
   openai_base_url: string | null;
 }
