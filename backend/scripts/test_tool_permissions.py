@@ -65,6 +65,22 @@ def main() -> int:
         assert_decision("deny", "bash", {"command": "git push origin main"}, str(root), config)
         assert_decision("ask", "bash", {"command": "git status && git push"}, str(root), config)
 
+        allow_all_bash_config = {
+            "tool_permissions": {
+                "default": "ask",
+                "rules": [
+                    {
+                        "id": "allow-all-bash-dangerously",
+                        "effect": "allow",
+                        "tool": "bash",
+                        "shell": "any",
+                    }
+                ],
+            }
+        }
+        assert_decision("allow", "bash", {"command": "git status && git push"}, str(root), allow_all_bash_config)
+        assert_decision("allow", "bash", {"command": "echo hi > out.txt"}, str(root), allow_all_bash_config)
+
     print("tool permission checks OK")
     return 0
 

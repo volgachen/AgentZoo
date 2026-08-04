@@ -117,7 +117,10 @@ def _explain_bash_permission(
     command = tool_args.get("command")
     if not isinstance(command, str) or not command.strip():
         return ToolPermissionExplanation("ask", "missing or invalid bash command")
+    shell_any_allow = _match_bash_shell_any_rule(permissions)
     if any(token in command for token in _SHELL_FEATURE_TOKENS):
+        if shell_any_allow is not None:
+            return shell_any_allow
         return ToolPermissionExplanation("ask", "bash command uses shell features; asking for confirmation")
     try:
         argv = shlex.split(command)
@@ -149,10 +152,34 @@ def _explain_bash_permission(
 
     if matching_allow is not None:
         return matching_allow
+    if shell_any_allow is not None:
+        return shell_any_allow
     default = permissions.get("default", "ask")
     if default in ("allow", "deny", "ask"):
         return ToolPermissionExplanation(default, "no matching rule; using tool_permissions.default")
     return ToolPermissionExplanation("ask", "invalid tool_permissions.default; using ask")
+
+
+def _match_bash_shell_any_rule(permissions: dict[str, Any]) -> ToolPermissionExplanation | None:
+    rules = permissions.get("rules", [])
+    matching_allow: ToolPermissionExplanation | None = None
+    if not isinstance(rules, list):
+        return None
+    for index, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            continue
+        if not _tool_matches(rule, "bash"):
+            continue
+        if rule.get("shell") != "any":
+            continue
+        effect = rule.get("effect")
+        rule_id = rule.get("id") if isinstance(rule.get("id"), str) else None
+        label = rule_id or f"rule_index={index}"
+        if effect == "deny":
+            return ToolPermissionExplanation("deny", f"matched deny shell-any rule {label}", rule_id)
+        if effect == "allow" and matching_allow is None:
+            matching_allow = ToolPermissionExplanation("allow", f"matched allow shell-any rule {label}", rule_id)
+    return matching_allow
 
 
 def _command_matches_any(argv: list[str], patterns: list[Any]) -> bool:
@@ -283,20 +310,26 @@ def validate_tool_permissions_config(permissions: object) -> None:
             for tool_index, item in enumerate(tools):
                 selected_tools.update(_validate_tool_selector_item(item, available, supported_tools, f"{prefix}.tools[{tool_index}]"))
         if "*" in (tool, *(tools if isinstance(tools, list) else [])):
-            if "paths" in rule and "commands" not in rule:
+            if "paths" in rule and "commands" not in rule and "shell" not in rule:
                 selected_tools &= set(_FILE_PATH_ARG_BY_TOOL)
-            elif "commands" in rule and "paths" not in rule:
+            elif ("commands" in rule or "shell" in rule) and "paths" not in rule:
                 selected_tools &= {"bash"}
         if selected_tools & set(_FILE_PATH_ARG_BY_TOOL):
             paths = rule.get("paths")
             if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
                 raise ValueError(f"{prefix}.paths must be a non-empty string array")
         if "bash" in selected_tools:
+            shell = rule.get("shell")
+            if shell is not None and shell != "any":
+                raise ValueError(f"{prefix}.shell must be 'any' when present")
             commands = rule.get("commands")
-            if not isinstance(commands, list) or not commands:
-                raise ValueError(f"{prefix}.commands must be a non-empty array for bash rules")
-            for command_index, command in enumerate(commands):
-                _validate_command_pattern(command, f"{prefix}.commands[{command_index}]")
+            if shell != "any":
+                if not isinstance(commands, list) or not commands:
+                    raise ValueError(f"{prefix}.commands must be a non-empty array for bash rules")
+                for command_index, command in enumerate(commands):
+                    _validate_command_pattern(command, f"{prefix}.commands[{command_index}]")
+            elif commands is not None:
+                raise ValueError(f"{prefix} cannot combine shell: 'any' with commands")
         rule_id = rule.get("id")
         if rule_id is not None and not isinstance(rule_id, str):
             raise ValueError(f"{prefix}.id must be a string when present")
