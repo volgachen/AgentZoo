@@ -1,3 +1,10 @@
+# 2026-08-06
+
+- **Active sessions 支持主动断开**：每个 WebSocket session 右侧新增 `×` 按钮，可断开当前前端连接，并清理对应的会话状态。
+- **工具调用摘要展示**：Live Console 和工具确认面板在未展开参数时也会显示关键参数；各工具的摘要字段可在 `frontend/src/config/toolDisplay.ts` 中配置。
+- **System Prompt 优化**：启动会话时将包含 runtime context 的最终 System Prompt 快照保存到数据库 `sessions.system_prompt_snapshot`，便于会话恢复和排查；右侧 System Prompt 面板同步简化展示。
+- **Windows Bash 兼容性修复**：优先解析 `AGENT_BASH_PATH` 或 `PATH` 中的 Bash，修复 Git Bash 下的工作目录接力和路径格式转换，并改善 Windows 非 UTF-8 命令输出的解码。
+
 # 2026-08-05
 
 - **Bash 使用 Git Bash 并修正 Windows CWD 接力**：`bash` 工具按 `AGENT_BASH_PATH`、系统 `PATH` 中的 `bash`、原默认 shell 顺序选择执行器。使用 Git Bash 时，CWD relay 的临时文件路径会在 Windows 原生格式与 `E:/...` drive-slash 格式之间转换，`pwd -P` 的结果也会规范化为 Windows drive-slash 路径，避免把 `/e/...` 形式直接传给 Python 的 `cwd`。
