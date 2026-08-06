@@ -1,5 +1,9 @@
 import asyncio
+import locale
 import os
+import re
+import shutil
+import sys
 import time
 import uuid
 from app.adapters.tools.base import BaseTool
@@ -11,14 +15,29 @@ _LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "tmp", "bas
 
 _DEFAULT_TIMEOUT = 120
 _DEFAULT_MAX_OUTPUT = 8192
+_BASH_PATH_ENV = "AGENT_BASH_PATH"
 
 # CWD relay: each bash call spawns a fresh subshell, so a trailing `cd` would
 # normally evaporate before the next call. Like Claude Code's BashTool, we don't
 # keep a persistent shell — instead we capture `pwd` to a side file after each
-# command and feed it back as the cwd of the next one. This is POSIX-only: the
-# capture wrapper uses sh syntax (`$?`, `pwd`), which cmd.exe can't parse, so on
-# Windows we fall back to the static working_dir (no regression).
-_CWD_RELAY = os.name == "posix"
+# command and feed it back as the cwd of the next one. The capture wrapper uses
+# sh syntax (`$?`, `pwd`), so only enable it when commands run under a resolved
+# bash executable. If bash cannot be resolved, we fall back to the platform's
+# default shell and skip cwd relay to preserve the old behavior.
+
+
+def _resolve_bash() -> str | None:
+    """Resolve the Bash executable, preferring explicit configuration over PATH."""
+    configured = os.environ.get(_BASH_PATH_ENV)
+    if configured:
+        configured_path = os.path.expandvars(os.path.expanduser(configured.strip()))
+        if os.path.isfile(configured_path):
+            return configured_path
+        resolved_configured = shutil.which(configured_path)
+        if resolved_configured:
+            return resolved_configured
+
+    return shutil.which("bash")
 
 
 def _log_path() -> str:
@@ -33,19 +52,44 @@ def _cwd_file() -> str:
     return os.path.abspath(os.path.join(_LOG_DIR, name))
 
 
+def _windows_slash_path(path: str) -> str:
+    """Normalize a Windows path to drive-slash form, e.g. E:/repo."""
+    if os.name != "nt":
+        return path
+    return os.path.abspath(path).replace("\\", "/")
+
+
+def _bash_to_windows_slash_path(path: str) -> str:
+    """Convert Git Bash path output to Windows drive-slash form."""
+    if os.name != "nt":
+        return path
+    normalized = path.replace("\\", "/")
+    drive_slash = re.match(r"^([A-Za-z]):/(.*)$", normalized)
+    if drive_slash:
+        drive, remainder = drive_slash.groups()
+        return f"{drive.upper()}:/{remainder}"
+    msys_root = re.match(r"^/([A-Za-z])(?:/(.*))?$", normalized)
+    if msys_root:
+        drive, remainder = msys_root.groups()
+        return f"{drive.upper()}:/{remainder or ''}"
+    return _windows_slash_path(path)
+
+
 def _wrap_with_cwd_capture(command: str, cwd_file: str) -> str:
-    """Append a `pwd` capture that records the post-command working directory to
-    a side file, without disturbing the command's stdout or exit code.
+    """Append a `pwd -P` capture using a shell-native path for the side file.
+
+    This does not disturb the command's stdout or exit code.
 
     The original exit code is saved before `pwd` runs and re-raised via `exit`,
     so the `[exit code: N]` header still reflects the user's command. `pwd` writes
     to its own file (not stdout), so the returned output is unchanged.
     """
-    quoted = cwd_file.replace('"', '\\"')
+    shell_cwd_file = _windows_slash_path(cwd_file)
+    quoted = shell_cwd_file.replace('"', '\\"')
     return (
         f"{command}\n"
         f"__az_rc=$?\n"
-        f'pwd > "{quoted}" 2>/dev/null || true\n'
+        f'pwd -P > "{quoted}" 2>/dev/null || true\n'
         f"exit $__az_rc\n"
     )
 
@@ -65,9 +109,42 @@ def _read_cwd_file(cwd_file: str) -> str | None:
             os.remove(cwd_file)
         except OSError:
             pass
+    value = _bash_to_windows_slash_path(value)
     if value and os.path.isdir(value):
         return value
     return None
+
+
+def _decode_process_output(data: bytes) -> str:
+    """Decode subprocess output without corrupting non-UTF-8 Windows output.
+
+    UTF-8 is still preferred because most tools emit it. On Windows, however,
+    commands launched through the default shell often emit the active ANSI/OEM
+    code page, such as cp936 for Simplified Chinese. Decoding those bytes with
+    errors="replace" produces permanent replacement characters like "����".
+    """
+    encodings = [
+        "utf-8",
+        locale.getpreferredencoding(False),
+        sys.getfilesystemencoding(),
+    ]
+    if os.name == "nt":
+        encodings.extend(["mbcs", "oem", "cp936", "gb18030"])
+
+    tried: set[str] = set()
+    for encoding in encodings:
+        if not encoding:
+            continue
+        normalized = encoding.lower()
+        if normalized in tried:
+            continue
+        tried.add(normalized)
+        try:
+            return data.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+
+    return data.decode("utf-8", errors="replace")
 
 
 @register_tool
@@ -79,6 +156,8 @@ class BashTool(BaseTool):
     # instance (one per session), so it does not survive a backend restart — the
     # session's static working_dir is the fallback.
     _cwd: str | None = None
+    _bash_path: str | None = None
+    _bash_resolved: bool = False
     description = (
         "Run a shell command on the host and return its combined stdout/stderr. "
         "Use timeout to bound runtime, max_output_length to cap returned text "
@@ -140,18 +219,40 @@ class BashTool(BaseTool):
         it, else the session's static working_dir."""
         return self._cwd or self.working_dir
 
+    def _get_bash_path(self) -> str | None:
+        if not self._bash_resolved:
+            self._bash_path = _resolve_bash()
+            self._bash_resolved = True
+        return self._bash_path
+
+    def _bash_command_args(self, command: str) -> list[str] | None:
+        bash_path = self._get_bash_path()
+        if not bash_path:
+            return None
+        return [bash_path, "-lc", command]
+
     async def _run_background(self, command: str) -> str:
         path = _log_path()
         # Keep the file handle open for the lifetime of the child; the OS closes
         # it when the detached process exits.
         log_file = open(path, "wb")
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=log_file,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-            cwd=self._effective_cwd(),
-        )
+        bash_args = self._bash_command_args(command)
+        if bash_args:
+            proc = await asyncio.create_subprocess_exec(
+                *bash_args,
+                stdout=log_file,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+                cwd=self._effective_cwd(),
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=log_file,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+                cwd=self._effective_cwd(),
+            )
         return (
             f"[Running in background] pid={proc.pid}\n"
             f"Output is being written to: {path}"
@@ -161,19 +262,27 @@ class BashTool(BaseTool):
         self, command: str, timeout: int, max_output_length: int
     ) -> str:
         # CWD relay: wrap the command so it records its final directory to a side
-        # file, then read it back to advance self._cwd for the next call. Skipped
-        # on non-POSIX shells (cmd.exe can't parse the wrapper).
-        cwd_file = _cwd_file() if _CWD_RELAY else None
-        run_command = (
-            _wrap_with_cwd_capture(command, cwd_file) if cwd_file else command
-        )
+        # file, then read it back to advance self._cwd for the next call. This is
+        # only safe when running under bash; fallback shells keep the old static cwd.
+        bash_args = self._bash_command_args(command)
+        cwd_file = _cwd_file() if bash_args else None
+        if cwd_file:
+            bash_args = self._bash_command_args(_wrap_with_cwd_capture(command, cwd_file))
 
-        proc = await asyncio.create_subprocess_shell(
-            run_command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=self._effective_cwd(),
-        )
+        if bash_args:
+            proc = await asyncio.create_subprocess_exec(
+                *bash_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=self._effective_cwd(),
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=self._effective_cwd(),
+            )
 
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -192,7 +301,7 @@ class BashTool(BaseTool):
             if new_cwd:
                 self._cwd = new_cwd
 
-        output = stdout.decode("utf-8", errors="replace")
+        output = _decode_process_output(stdout)
         header = f"[exit code: {proc.returncode}]\n"
 
         if len(output) <= max_output_length:

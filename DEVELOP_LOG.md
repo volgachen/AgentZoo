@@ -1,3 +1,8 @@
+# 2026-08-05
+
+- **Bash 使用 Git Bash 并修正 Windows CWD 接力**：`bash` 工具按 `AGENT_BASH_PATH`、系统 `PATH` 中的 `bash`、原默认 shell 顺序选择执行器。使用 Git Bash 时，CWD relay 的临时文件路径会在 Windows 原生格式与 `E:/...` drive-slash 格式之间转换，`pwd -P` 的结果也会规范化为 Windows drive-slash 路径，避免把 `/e/...` 形式直接传给 Python 的 `cwd`。
+- **Claude Code BashTool 借鉴项记录**：已在 `TODO.md` 的 bash 工具章节记录可后续考虑的 shell 可执行性验证、跨工具共享 CWD、环境快照、实时输出、后台任务管理、自动后台化、命令级安全解析和 sandbox 等方向。
+
 # 2026-08-04
 
 - **工具权限系统第一版落地**：新增 `tool_permissions` 规则机制，支持 `read` / `write` / `edit` 基于路径的 `allow` / `deny` / `ask` 决策，并支持 `tool` / `tools` 两种工具选择写法。路径会按 session working directory 规范化，避免 `../` 绕过目录规则。
