@@ -4,6 +4,7 @@
 - **工具调用摘要展示**：Live Console 和工具确认面板在未展开参数时也会显示关键参数；各工具的摘要字段可在 `frontend/src/config/toolDisplay.ts` 中配置。
 - **System Prompt 优化**：启动会话时将包含 runtime context 的最终 System Prompt 快照保存到数据库 `sessions.system_prompt_snapshot`，便于会话恢复和排查；右侧 System Prompt 面板同步简化展示。
 - **Windows Bash 兼容性修复**：优先解析 `AGENT_BASH_PATH` 或 `PATH` 中的 Bash，修复 Git Bash 下的工作目录接力和路径格式转换，并改善 Windows 非 UTF-8 命令输出的解码。
+- **Wechat 插件优化**：修复 Wechat 插件按 session 反向转发 Agent 回复时的遗留问题，并将 Wechat 入站消息前缀简化为 `[send from wechat]`。
 
 # 2026-08-05
 

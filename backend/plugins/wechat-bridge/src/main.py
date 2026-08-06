@@ -101,6 +101,7 @@ class AugentiaHost:
                 "session_id": session_id,
                 "content": content,
                 "source": source,
+                "from_session_id": None,
             },
         }
         print(json.dumps(action), flush=True)
@@ -162,7 +163,7 @@ class WeChatBridgePlugin:
 
         await self.host.send_session_message(
             session_id,
-            text,
+            f"[send from wechat] {text}",
             source=f"wechat:{wechat_user_id}",
         )
 
@@ -417,17 +418,6 @@ class WeChatBridgePlugin:
             return
 
         session_id = data.get("session_id")
-        if (
-            self.config.default_session_id
-            and session_id != self.config.default_session_id
-        ):
-            print(
-                f"ignored agent reply from session={session_id}; "
-                f"default_session_id={self.config.default_session_id}",
-                flush=True,
-            )
-            return
-
         content = data.get("content")
         if not content:
             print("ignored message.created without content", flush=True)
@@ -441,17 +431,29 @@ class WeChatBridgePlugin:
             return
         state = self._session_state(session_id)
         if state.bot is None or state.status != "Connected":
-            print(f"session={session_id} is not connected; reply ignored", flush=True)
+            message = f"session is not connected; agent reply ignored"
+            print(f"session={session_id} {message}", flush=True)
+            self.emit_session_log(session_id, message, level="warning")
             return
         if not state.last_wechat_user_id:
-            print(f"session={session_id} has no last WeChat user; reply ignored", flush=True)
+            message = "no WeChat contact has messaged this session yet; agent reply ignored"
+            print(f"session={session_id} {message}", flush=True)
+            self.emit_session_log(session_id, message, level="warning")
             return
 
         print(
             f"forwarding agent reply session={session_id} to wechat user={state.last_wechat_user_id}",
             flush=True,
         )
-        await state.bot.send(state.last_wechat_user_id, text)
+        try:
+            await state.bot.send(state.last_wechat_user_id, text)
+            self.emit_session_log(session_id, "agent reply forwarded to WeChat")
+        except Exception as exc:
+            self.emit_session_log(
+                session_id,
+                f"failed to forward agent reply to WeChat: {exc}",
+                level="error",
+            )
 
 
 async def async_main() -> None:

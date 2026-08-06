@@ -38,7 +38,12 @@ class PluginActionDispatcher:
             raise RuntimeError("session.message.send requires data.content")
 
         await self._db.get_session(session_id)
-        source = f"plugin:{plugin_instance_id}"
+        source: str | None = f"plugin:{plugin_instance_id}"
+        if "from_session_id" in data:
+            requested_source = data.get("from_session_id")
+            if requested_source is not None and not isinstance(requested_source, str):
+                raise RuntimeError("session.message.send data.from_session_id must be a string or null")
+            source = requested_source
         try:
             runner = self._session_registry.get(session_id)
         except KeyError:
