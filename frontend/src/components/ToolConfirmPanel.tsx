@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getToolSummary } from "../config/toolDisplay";
 import ToolPreview from "./ToolPreview";
 
 interface ToolConfirmPanelProps {
@@ -18,6 +19,7 @@ export default function ToolConfirmPanel({
 }: ToolConfirmPanelProps) {
   const [supplementaryMessage, setSupplementaryMessage] = useState("");
   const [minimized, setMinimized] = useState(false);
+  const summary = getToolSummary(name, args);
 
   const handleApprove = () => {
     onApprove(supplementaryMessage.trim() || undefined);
@@ -37,8 +39,9 @@ export default function ToolConfirmPanel({
       }`}
     >
       <div className="flex items-center gap-3">
-        <span className="min-w-0 truncate text-orange-300 text-sm font-medium shrink">
-          ⚠ Tool Confirm <span className="text-orange-200">({name})</span>
+        <span className="min-w-0 truncate text-orange-300 text-sm font-medium shrink" title={`call_id: ${callId}`}>
+          ⚠ Tool Confirm <span className="text-orange-200">{name}</span>
+          {summary && <span className="text-gray-400 font-mono font-normal"> {summary}</span>}
         </span>
         <div className="flex-1" />
         <button

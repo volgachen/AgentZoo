@@ -8,6 +8,7 @@ import ToolConfirmPanel from "../components/ToolConfirmPanel";
 import ToolPermissionsPanel from "../components/ToolPermissionsPanel";
 import SystemPromptPanel from "../components/SystemPromptPanel";
 import ToolPreview from "../components/ToolPreview";
+import { getToolSummary } from "../config/toolDisplay";
 
 const EVENT_STYLE: Record<string, string> = {
   text: "text-gray-200",
@@ -184,17 +185,18 @@ function buildConsoleItems(events: StreamEvent[]): ConsoleItem[] {
 
 function ToolCallLine({ item }: { item: ToolCallView }) {
   const [expanded, setExpanded] = useState(false);
+  const summary = getToolSummary(item.name, item.args);
   return (
     <div className="text-left font-mono text-sm text-yellow-400">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="w-full text-left flex items-start gap-1 hover:bg-gray-800/40 rounded px-1 -mx-1 cursor-pointer"
-        title={expanded ? "Collapse" : "Expand"}
+        title={`${expanded ? "Collapse" : "Expand"} · call_id: ${item.callId}`}
       >
         <span className="text-gray-500 select-none">{expanded ? "▾" : "▸"}</span>
         <span className="shrink-0">⚙ {item.name}</span>
-        <span className="text-gray-500 truncate">{item.callId}</span>
+        {summary && <span className="text-gray-400 truncate">{summary}</span>}
       </button>
       {expanded && (
         <div className="ml-4">
