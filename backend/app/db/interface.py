@@ -48,10 +48,18 @@ class IAgentDatabase(ABC):
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
         additional_prompt_path: str | None = None,
+        system_prompt_snapshot: str | None = None,
     ) -> Session: pass
 
     @abstractmethod
     async def get_session(self, session_id: str) -> Session: pass
+
+    @abstractmethod
+    async def update_session_system_prompt_snapshot(
+        self,
+        session_id: str,
+        system_prompt_snapshot: str,
+    ) -> Session: pass
 
     @abstractmethod
     async def update_session_title(self, session_id: str, title: str) -> Session: pass

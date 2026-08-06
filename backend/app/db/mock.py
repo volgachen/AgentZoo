@@ -83,6 +83,7 @@ class MockMemoryDatabase(IAgentDatabase):
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
         additional_prompt_path: str | None = None,
+        system_prompt_snapshot: str | None = None,
     ) -> Session:
         agent = await self.get_agent(agent_id)  # validate agent exists
         session = Session(
@@ -93,6 +94,7 @@ class MockMemoryDatabase(IAgentDatabase):
             parent_session_id=parent_session_id,
             additional_prompt=additional_prompt,
             additional_prompt_path=additional_prompt_path,
+            system_prompt_snapshot=system_prompt_snapshot,
         )
         if not session.title:
             session.title = f"{agent.name} · {session.created_at:%H:%M}"
@@ -104,6 +106,15 @@ class MockMemoryDatabase(IAgentDatabase):
         session = self._sessions.get(session_id)
         if session is None or session.deleted_at is not None:
             raise KeyError(f"Session '{session_id}' not found")
+        return session
+
+    async def update_session_system_prompt_snapshot(
+        self,
+        session_id: str,
+        system_prompt_snapshot: str,
+    ) -> Session:
+        session = await self.get_session(session_id)
+        session.system_prompt_snapshot = system_prompt_snapshot
         return session
 
     async def update_session_title(self, session_id: str, title: str) -> Session:

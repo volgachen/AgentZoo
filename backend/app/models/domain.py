@@ -70,6 +70,10 @@ class Session(BaseModel):
     # re-read on rehydrate).
     additional_prompt: Optional[str] = None
     additional_prompt_path: Optional[str] = None
+    # Final system prompt snapshot used to start this session. Unlike
+    # additional_prompt_path, this is not recomputed after launch; it preserves the
+    # exact effective prompt for rehydration and debugging.
+    system_prompt_snapshot: Optional[str] = None
     status: SessionStatus = SessionStatus.INITIALIZING
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

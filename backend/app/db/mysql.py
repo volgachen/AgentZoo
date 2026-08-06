@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     parent_session_id VARCHAR(36)   DEFAULT NULL,
     additional_prompt LONGTEXT      DEFAULT NULL,
     additional_prompt_path VARCHAR(1000) DEFAULT NULL,
+    system_prompt_snapshot LONGTEXT DEFAULT NULL,
     status            VARCHAR(30)   NOT NULL DEFAULT 'INITIALIZING',
     created_at        DATETIME(3)   NOT NULL,
     updated_at        DATETIME(3)   NOT NULL,
@@ -180,6 +181,14 @@ _COLUMN_MIGRATIONS: list[tuple[str, str, list[str]]] = [
     ),
     (
         "sessions",
+        "system_prompt_snapshot",
+        [
+            "ALTER TABLE sessions ADD COLUMN system_prompt_snapshot LONGTEXT DEFAULT NULL "
+            "AFTER additional_prompt_path"
+        ],
+    ),
+    (
+        "sessions",
         "deleted_at",
         ["ALTER TABLE sessions ADD COLUMN deleted_at DATETIME(3) DEFAULT NULL AFTER last_message_at"],
     ),
@@ -232,6 +241,7 @@ def _row_to_session(row: dict[str, Any]) -> Session:
         # (see CLAUDE.md / migration notes).
         additional_prompt=row.get("additional_prompt"),
         additional_prompt_path=row.get("additional_prompt_path"),
+        system_prompt_snapshot=row.get("system_prompt_snapshot"),
         status=SessionStatus(row["status"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -531,6 +541,7 @@ class MySqlDatabase(IAgentDatabase):
         parent_session_id: str | None = None,
         additional_prompt: str | None = None,
         additional_prompt_path: str | None = None,
+        system_prompt_snapshot: str | None = None,
     ) -> Session:
         agent = await self.get_agent(agent_id)
         session = Session(
@@ -541,6 +552,7 @@ class MySqlDatabase(IAgentDatabase):
             parent_session_id=parent_session_id,
             additional_prompt=additional_prompt,
             additional_prompt_path=additional_prompt_path,
+            system_prompt_snapshot=system_prompt_snapshot,
         )
         # Seed a friendly default so the UI never shows a blank title. Uses the
         # agent's name + creation time; a caller-supplied title (e.g. a spawning
@@ -553,8 +565,9 @@ class MySqlDatabase(IAgentDatabase):
                     """INSERT INTO sessions
                        (id, agent_id, title, working_dir, parent_session_id,
                         additional_prompt, additional_prompt_path,
+                        system_prompt_snapshot,
                         status, created_at, updated_at, last_message_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         session.id,
                         session.agent_id,
@@ -563,6 +576,7 @@ class MySqlDatabase(IAgentDatabase):
                         session.parent_session_id,
                         session.additional_prompt,
                         session.additional_prompt_path,
+                        session.system_prompt_snapshot,
                         session.status.value,
                         session.created_at,
                         session.updated_at,
@@ -593,6 +607,24 @@ class MySqlDatabase(IAgentDatabase):
         if row is None:
             raise KeyError(f"Session '{session_id}' not found")
         return _row_to_session(row)
+
+    async def update_session_system_prompt_snapshot(
+        self,
+        session_id: str,
+        system_prompt_snapshot: str,
+    ) -> Session:
+        now = datetime.now(timezone.utc)
+        async with self._pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                result = await cur.execute(
+                    """UPDATE sessions
+                       SET system_prompt_snapshot = %s, updated_at = %s
+                       WHERE id = %s AND deleted_at IS NULL""",
+                    (system_prompt_snapshot, now, session_id),
+                )
+        if result == 0:
+            raise KeyError(f"Session '{session_id}' not found")
+        return await self.get_session(session_id)
 
     async def list_sessions(self) -> list[Session]:
         async with self._pool.acquire() as conn:

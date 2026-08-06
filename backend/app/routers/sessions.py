@@ -135,6 +135,24 @@ def _effective_system_prompt(
     return system_prompt + "\n\n" + _runtime_context_prompt(session)
 
 
+async def _ensure_system_prompt_snapshot(
+    session: Session,
+    agent: AgentTemplate,
+    db: IAgentDatabase,
+    additional_prompt: str | None = None,
+    additional_prompt_path: str | None = None,
+) -> Session:
+    if session.system_prompt_snapshot:
+        return session
+    prompt = _effective_system_prompt(
+        agent,
+        session,
+        additional_prompt,
+        additional_prompt_path,
+    )
+    return await db.update_session_system_prompt_snapshot(session.id, prompt)
+
+
 async def _build_runner(
     session: Session,
     agent: AgentTemplate,
@@ -148,6 +166,13 @@ async def _build_runner(
     post-restart rehydration path (history restored from the DB). Raises
     ValueError/RuntimeError on adapter start failure; the caller decides how to
     surface that."""
+    session = await _ensure_system_prompt_snapshot(
+        session,
+        agent,
+        db,
+        additional_prompt,
+        additional_prompt_path,
+    )
     session_config = ensure_session_config(session.id, agent.config)
     if agent.agent_type == AgentType.CLAUDE_CODE:
         adapter = ClaudeCodeAdapter(working_dir=session.working_dir, session_id=session.id)
@@ -163,8 +188,7 @@ async def _build_runner(
     else:
         raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
 
-    system_prompt = _effective_system_prompt(agent, session, additional_prompt, additional_prompt_path)
-    await adapter.start(system_prompt)
+    await adapter.start(session.system_prompt_snapshot or "")
 
     # Rebuild prior context so a session rehydrated after a restart isn't
     # amnesiac. No-op for a fresh session (no rows) or adapters that don't
@@ -409,6 +433,8 @@ async def get_session_system_prompt(
         prompt = runner.current_system_prompt()
         if prompt is not None:
             return {"system_prompt": prompt, "source": "live_adapter"}
+    if session.system_prompt_snapshot:
+        return {"system_prompt": session.system_prompt_snapshot, "source": "snapshot"}
     try:
         prompt = _effective_system_prompt(
             agent,
@@ -418,6 +444,10 @@ async def get_session_system_prompt(
         )
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    try:
+        await db.update_session_system_prompt_snapshot(session.id, prompt)
+    except KeyError:
+        pass
     return {"system_prompt": prompt, "source": "recomputed"}
 
 

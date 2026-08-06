@@ -67,6 +67,7 @@ def _session(row: sqlite3.Row) -> Session:
         working_dir=row["working_dir"], parent_session_id=row["parent_session_id"],
         additional_prompt=row["additional_prompt"],
         additional_prompt_path=row["additional_prompt_path"],
+        system_prompt_snapshot=row["system_prompt_snapshot"],
         status=SessionStatus(row["status"]), created_at=_dt(row["created_at"]),
         updated_at=_dt(row["updated_at"]), last_message_at=_dt(row["last_message_at"]),
         deleted_at=_dt(row["deleted_at"]),
@@ -170,6 +171,7 @@ class SqliteDatabase(IAgentDatabase):
                 parent_session_id TEXT DEFAULT NULL,
                 additional_prompt TEXT DEFAULT NULL,
                 additional_prompt_path TEXT DEFAULT NULL,
+                system_prompt_snapshot TEXT DEFAULT NULL,
                 status TEXT NOT NULL DEFAULT 'INITIALIZING',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -268,7 +270,17 @@ class SqliteDatabase(IAgentDatabase):
             );
             """
         )
+        self._ensure_schema_columns()
         self._conn.commit()
+
+    def _ensure_schema_columns(self) -> None:
+        session_columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(sessions)")
+        }
+        if "system_prompt_snapshot" not in session_columns:
+            self._conn.execute(
+                "ALTER TABLE sessions ADD COLUMN system_prompt_snapshot TEXT DEFAULT NULL"
+            )
 
     def _seed_agents(self) -> None:
         now = datetime.now(timezone.utc)
@@ -332,18 +344,20 @@ class SqliteDatabase(IAgentDatabase):
             parent_session_id=kwargs.get("parent_session_id"),
             additional_prompt=kwargs.get("additional_prompt"),
             additional_prompt_path=kwargs.get("additional_prompt_path"),
+            system_prompt_snapshot=kwargs.get("system_prompt_snapshot"),
         )
         if not session.title:
             session.title = f"{agent.name} · {session.created_at:%H:%M}"
         self._execute(
             """INSERT INTO sessions
                (id, agent_id, title, working_dir, parent_session_id, additional_prompt,
-                additional_prompt_path, status, created_at, updated_at, last_message_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                additional_prompt_path, system_prompt_snapshot, status, created_at,
+                updated_at, last_message_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (session.id, session.agent_id, session.title, session.working_dir,
              session.parent_session_id, session.additional_prompt, session.additional_prompt_path,
-             session.status.value, _iso(session.created_at), _iso(session.updated_at),
-             _iso(session.last_message_at)),
+             session.system_prompt_snapshot, session.status.value, _iso(session.created_at),
+             _iso(session.updated_at), _iso(session.last_message_at)),
         )
         return session
 
@@ -352,6 +366,20 @@ class SqliteDatabase(IAgentDatabase):
         if row is None:
             raise KeyError(f"Session '{session_id}' not found")
         return _session(row)
+
+    async def update_session_system_prompt_snapshot(
+        self,
+        session_id: str,
+        system_prompt_snapshot: str,
+    ) -> Session:
+        now = datetime.now(timezone.utc)
+        cur = self._execute(
+            "UPDATE sessions SET system_prompt_snapshot = ?, updated_at = ? WHERE id = ?",
+            (system_prompt_snapshot, _iso(now), session_id),
+        )
+        if cur.rowcount == 0:
+            raise KeyError(f"Session '{session_id}' not found")
+        return await self.get_session(session_id)
 
     async def update_session_title(self, session_id: str, title: str) -> Session:
         now = datetime.now(timezone.utc)
