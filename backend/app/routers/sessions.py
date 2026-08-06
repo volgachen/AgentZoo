@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import os
+import platform
 import re
 import shutil
 import subprocess
@@ -75,8 +77,48 @@ class RetryMessageRequest(BaseModel):
     content: str
 
 
+def _display_path(path: str) -> str:
+    """Render local paths in the most shell-portable form for this host."""
+    if os.name == "nt":
+        return path.replace("\\", "/")
+    return path
+
+
+def _runtime_context_prompt(session: Session) -> str:
+    """Build session-specific runtime context appended to the system prompt."""
+    os_name = platform.platform()
+    working_dir = _display_path(session.working_dir or os.getcwd())
+    shell_note = ""
+    if os.name == "nt":
+        bash_path = os.environ.get("AGENT_BASH_PATH") or shutil.which("bash")
+        if bash_path:
+            bash_path_display = _display_path(bash_path)
+            shell_note = (
+                "\n- The bash tool resolves to Git Bash-compatible execution on this "
+                "Windows host. POSIX shell syntax is supported."
+                "\n- Use Windows drive-slash paths such as E:/Projects/AgentZoo "
+                "for shell-compatible local paths."
+                f"\n- Resolved bash executable: {bash_path_display}"
+            )
+        else:
+            shell_note = (
+                "\n- The bash tool could not resolve a bash executable from "
+                "AGENT_BASH_PATH or PATH, so it will fall back to the platform "
+                "default shell. POSIX shell syntax may not be supported."
+            )
+
+    return (
+        "# Runtime context\n"
+        f"- Operating system: {os_name}\n"
+        f"- Current working directory: {working_dir}\n"
+        f"- Session start time: {session.created_at.isoformat()}"
+        f"{shell_note}"
+    )
+
+
 def _effective_system_prompt(
     agent: AgentTemplate,
+    session: Session,
     additional_prompt: str | None = None,
     additional_prompt_path: str | None = None,
 ) -> str:
@@ -90,7 +132,7 @@ def _effective_system_prompt(
         except (OSError, UnicodeDecodeError) as e:
             logger.exception("failed to read additional_prompt_path=%s", additional_prompt_path)
             raise ValueError(f"failed to read additional system prompt from {additional_prompt_path}: {e}")
-    return system_prompt
+    return system_prompt + "\n\n" + _runtime_context_prompt(session)
 
 
 async def _build_runner(
@@ -121,7 +163,7 @@ async def _build_runner(
     else:
         raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
 
-    system_prompt = _effective_system_prompt(agent, additional_prompt, additional_prompt_path)
+    system_prompt = _effective_system_prompt(agent, session, additional_prompt, additional_prompt_path)
     await adapter.start(system_prompt)
 
     # Rebuild prior context so a session rehydrated after a restart isn't
@@ -370,6 +412,7 @@ async def get_session_system_prompt(
     try:
         prompt = _effective_system_prompt(
             agent,
+            session,
             session.additional_prompt,
             session.additional_prompt_path,
         )
