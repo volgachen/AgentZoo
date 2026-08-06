@@ -133,6 +133,7 @@ interface Store {
   sendMessage: (sessionId: string, content: string) => void;
   retryMessage: (sessionId: string, messageId: string, content: string) => Promise<void>;
   resolveConfirm: (sessionId: string, callId: string, approved: boolean, message?: string) => void;
+  disconnectSession: (sessionId: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   refreshSession: (sessionId: string) => Promise<void>;
@@ -549,6 +550,25 @@ export const useStore = create<Store>((set, get) => {
               ),
             },
           },
+        };
+      });
+    },
+
+    disconnectSession: (sessionId) => {
+      const entry = get().sessions[sessionId];
+      if (!entry) return;
+      entry.socket?.close();
+      dismissSessionToasts(sessionId);
+      set((s) => {
+        const current = s.sessions[sessionId];
+        if (!current) return s;
+        return {
+          sessions: {
+            ...s.sessions,
+            [sessionId]: { ...current, socket: null, generating: false },
+          },
+          activeSessionId:
+            s.activeSessionId === sessionId ? null : s.activeSessionId,
         };
       });
     },

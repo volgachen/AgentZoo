@@ -30,6 +30,7 @@ export default function ActiveSessionsMenu({
 }) {
   const sessions = useStore((s) => s.sessions);
   const setActive = useStore((s) => s.setActiveSession);
+  const disconnectSession = useStore((s) => s.disconnectSession);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
@@ -101,11 +102,9 @@ export default function ActiveSessionsMenu({
                 (s.status === "WAITING_USER" ||
                   s.status === "WAITING_CONFIRM");
               return (
-                <button
+                <div
                   key={s.id}
-                  type="button"
-                  onClick={() => jump(s.id)}
-                  className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-gray-800 ${
+                  className={`flex items-center gap-1 px-2 py-1.5 hover:bg-gray-800 ${
                     isCurrent
                       ? "bg-gray-800/60"
                       : isUnreadAttention
@@ -113,23 +112,41 @@ export default function ActiveSessionsMenu({
                         : ""
                   }`}
                 >
-                  <span className="min-w-0 text-xs text-gray-300 truncate">
-                    {isUnreadAttention && (
-                      <span className="mr-1 text-orange-400">●</span>
-                    )}
-                    {s.title ?? `${s.id.slice(0, 8)}…`}
-                    {isCurrent && (
-                      <span className="ml-1 text-[10px] text-indigo-400">
-                        current
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_STYLE[s.status]}`}
+                  <button
+                    type="button"
+                    onClick={() => jump(s.id)}
+                    className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left"
                   >
-                    {s.status}
-                  </span>
-                </button>
+                    <span className="min-w-0 text-xs text-gray-300 truncate">
+                      {isUnreadAttention && (
+                        <span className="mr-1 text-orange-400">●</span>
+                      )}
+                      {s.title ?? `${s.id.slice(0, 8)}…`}
+                      {isCurrent && (
+                        <span className="ml-1 text-[10px] text-indigo-400">
+                          current
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_STYLE[s.status]}`}
+                    >
+                      {s.status}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Disconnect ${s.title ?? s.id}`}
+                    title="Disconnect WebSocket"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      disconnectSession(s.id);
+                    }}
+                    className="shrink-0 rounded px-1.5 py-0.5 text-gray-500 hover:bg-red-900/60 hover:text-red-300 text-sm leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
               );
             })
           )}
