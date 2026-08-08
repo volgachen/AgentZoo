@@ -108,17 +108,24 @@ class AugentiaHost:
 
 
 def plain_text_content(content: Any) -> str | None:
+    """Extract only a non-empty textual content field for WeChat delivery."""
     if isinstance(content, str):
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError:
-            return content
-        if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
-            return parsed["content"]
-        return content
-    if isinstance(content, dict) and isinstance(content.get("content"), str):
-        return content["content"]
-    return None
+            text = content
+        else:
+            if not isinstance(parsed, dict):
+                return None
+            text = parsed.get("content")
+    elif isinstance(content, dict):
+        text = content.get("content")
+    else:
+        return None
+
+    if not isinstance(text, str) or not text.strip():
+        return None
+    return text.strip()
 
 
 class WeChatBridgePlugin:
