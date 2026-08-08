@@ -104,8 +104,9 @@ def _plugin_run(row: sqlite3.Row) -> PluginRun:
 def _plugin_log(row: sqlite3.Row) -> PluginLog:
     return PluginLog(
         id=row["id"], plugin_instance_id=row["plugin_instance_id"],
-        plugin_run_id=row["plugin_run_id"], ts=_dt(row["ts"]), stream=row["stream"],
-        level=row["level"], line=row["line"],
+        plugin_run_id=row["plugin_run_id"], session_id=row["session_id"],
+        ts=_dt(row["ts"]), stream=row["stream"], level=row["level"],
+        line=row["line"],
     )
 
 
@@ -234,6 +235,7 @@ class SqliteDatabase(IAgentDatabase):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 plugin_instance_id TEXT NOT NULL,
                 plugin_run_id TEXT NOT NULL,
+                session_id TEXT DEFAULT NULL,
                 ts TEXT NOT NULL,
                 stream TEXT NOT NULL,
                 level TEXT DEFAULT NULL,
@@ -281,6 +283,18 @@ class SqliteDatabase(IAgentDatabase):
             self._conn.execute(
                 "ALTER TABLE sessions ADD COLUMN system_prompt_snapshot TEXT DEFAULT NULL"
             )
+
+        plugin_log_columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(plugin_logs)")
+        }
+        if "session_id" not in plugin_log_columns:
+            self._conn.execute(
+                "ALTER TABLE plugin_logs ADD COLUMN session_id TEXT DEFAULT NULL"
+            )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_plugin_logs_session_ts "
+            "ON plugin_logs (session_id, ts)"
+        )
 
     def _seed_agents(self) -> None:
         now = datetime.now(timezone.utc)
@@ -556,19 +570,35 @@ class SqliteDatabase(IAgentDatabase):
     async def add_plugin_log(self, plugin_instance_id: str, plugin_run_id: str, stream: str, line: str, **kwargs: Any) -> PluginLog:
         await self.get_plugin_instance(plugin_instance_id)
         await self.get_plugin_run(plugin_run_id)
-        log = PluginLog(plugin_instance_id=plugin_instance_id, plugin_run_id=plugin_run_id,
-                        stream=stream, level=kwargs.get("level"), line=line)
+        log = PluginLog(
+            plugin_instance_id=plugin_instance_id,
+            plugin_run_id=plugin_run_id,
+            session_id=kwargs.get("session_id"),
+            stream=stream,
+            level=kwargs.get("level"),
+            line=line,
+        )
         cur = self._execute(
             """INSERT INTO plugin_logs
-               (plugin_instance_id, plugin_run_id, ts, stream, level, line)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (log.plugin_instance_id, log.plugin_run_id, _iso(log.ts), log.stream, log.level, log.line),
+               (plugin_instance_id, plugin_run_id, session_id, ts, stream, level, line)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                log.plugin_instance_id,
+                log.plugin_run_id,
+                log.session_id,
+                _iso(log.ts),
+                log.stream,
+                log.level,
+                log.line,
+            ),
         )
         log.id = cur.lastrowid
         return log
 
     async def list_plugin_logs(self, *, plugin_instance_id: str | None = None,
-                               plugin_run_id: str | None = None, limit: int = 500) -> list[PluginLog]:
+                               plugin_run_id: str | None = None,
+                               session_id: str | None = None,
+                               limit: int = 500) -> list[PluginLog]:
         clauses: list[str] = []
         values: list[Any] = []
         if plugin_instance_id is not None:
@@ -577,6 +607,9 @@ class SqliteDatabase(IAgentDatabase):
         if plugin_run_id is not None:
             clauses.append("plugin_run_id = ?")
             values.append(plugin_run_id)
+        if session_id is not None:
+            clauses.append("session_id = ?")
+            values.append(session_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._rows(f"SELECT * FROM plugin_logs {where} ORDER BY ts DESC, id DESC LIMIT ?", [*values, limit])
         return [_plugin_log(r) for r in reversed(rows)]

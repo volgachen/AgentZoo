@@ -1,25 +1,24 @@
 import asyncio
 import json
 import logging
-import os
-import platform
-import re
-import shutil
-import subprocess
 import uuid
 from enum import Enum
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from app.config import get_settings
 from app.db.interface import IAgentDatabase
 from app.db.deps import get_db
-from app.models.domain import Session, SessionStatus, MessageRole, AgentType, AgentTemplate
+from app.models.domain import Session, SessionStatus, MessageRole, AgentType
 from app.adapters.registry import AdapterRegistry, get_registry
-from app.adapters.claude_code import ClaudeCodeAdapter
-from app.adapters.openai_tool_use import OpenAIToolUseAdapter
-from app.core.runner import SessionRunner
 from app.core.session_config import ensure_session_config, write_session_config
+from app.core.session_prompt import effective_system_prompt
+from app.core.session_runtime import build_runner, get_or_rehydrate
+from app.core.workspace import (
+    copy_workspace,
+    create_git_worktree,
+    target_dir_for_session,
+    worktree_root,
+)
 from app.adapters.tools.permissions import explain_tool_permission, validate_tool_permissions_config
 
 logger = logging.getLogger("augentia.sessions")
@@ -77,228 +76,6 @@ class RetryMessageRequest(BaseModel):
     content: str
 
 
-def _display_path(path: str) -> str:
-    """Render local paths in the most shell-portable form for this host."""
-    if os.name == "nt":
-        return path.replace("\\", "/")
-    return path
-
-
-def _runtime_context_prompt(session: Session) -> str:
-    """Build session-specific runtime context appended to the system prompt."""
-    os_name = platform.platform()
-    working_dir = _display_path(session.working_dir or os.getcwd())
-    shell_note = ""
-    if os.name == "nt":
-        bash_path = os.environ.get("AGENT_BASH_PATH") or shutil.which("bash")
-        if bash_path:
-            bash_path_display = _display_path(bash_path)
-            shell_note = (
-                "\n- The bash tool resolves to Git Bash-compatible execution on this "
-                "Windows host. POSIX shell syntax is supported."
-                "\n- Use Windows drive-slash paths such as E:/Projects/AgentZoo "
-                "for shell-compatible local paths."
-                f"\n- Resolved bash executable: {bash_path_display}"
-            )
-        else:
-            shell_note = (
-                "\n- The bash tool could not resolve a bash executable from "
-                "AGENT_BASH_PATH or PATH, so it will fall back to the platform "
-                "default shell. POSIX shell syntax may not be supported."
-            )
-
-    return (
-        "# Runtime context\n"
-        f"- Operating system: {os_name}\n"
-        f"- Current working directory: {working_dir}\n"
-        f"- Session start time: {session.created_at.isoformat()}"
-        f"{shell_note}"
-    )
-
-
-def _effective_system_prompt(
-    agent: AgentTemplate,
-    session: Session,
-    additional_prompt: str | None = None,
-    additional_prompt_path: str | None = None,
-) -> str:
-    system_prompt = agent.system_prompt
-    if additional_prompt:
-        system_prompt = system_prompt + "\n\n" + additional_prompt
-    if additional_prompt_path:
-        try:
-            extra_content = Path(additional_prompt_path).read_text(encoding="utf-8")
-            system_prompt = system_prompt + "\n\n" + extra_content
-        except (OSError, UnicodeDecodeError) as e:
-            logger.exception("failed to read additional_prompt_path=%s", additional_prompt_path)
-            raise ValueError(f"failed to read additional system prompt from {additional_prompt_path}: {e}")
-    return system_prompt + "\n\n" + _runtime_context_prompt(session)
-
-
-async def _ensure_system_prompt_snapshot(
-    session: Session,
-    agent: AgentTemplate,
-    db: IAgentDatabase,
-    additional_prompt: str | None = None,
-    additional_prompt_path: str | None = None,
-) -> Session:
-    if session.system_prompt_snapshot:
-        return session
-    prompt = _effective_system_prompt(
-        agent,
-        session,
-        additional_prompt,
-        additional_prompt_path,
-    )
-    return await db.update_session_system_prompt_snapshot(session.id, prompt)
-
-
-async def _build_runner(
-    session: Session,
-    agent: AgentTemplate,
-    db: IAgentDatabase,
-    registry: AdapterRegistry,
-    additional_prompt: str | None = None,
-    additional_prompt_path: str | None = None,
-) -> SessionRunner:
-    """Construct + start the adapter and its runner, register it, and replay any
-    persisted conversation. Shared by create_session (fresh, no history) and the
-    post-restart rehydration path (history restored from the DB). Raises
-    ValueError/RuntimeError on adapter start failure; the caller decides how to
-    surface that."""
-    session = await _ensure_system_prompt_snapshot(
-        session,
-        agent,
-        db,
-        additional_prompt,
-        additional_prompt_path,
-    )
-    session_config = ensure_session_config(session.id, agent.config)
-    if agent.agent_type == AgentType.CLAUDE_CODE:
-        adapter = ClaudeCodeAdapter(working_dir=session.working_dir, session_id=session.id)
-    elif agent.agent_type == AgentType.TOOL_USE:
-        adapter = OpenAIToolUseAdapter(
-            tool_names=agent.tool_names,
-            model=agent.openai_model,
-            base_url=agent.openai_base_url,
-            session_id=session.id,
-            working_dir=session.working_dir,
-            config=session_config,
-        )
-    else:
-        raise RuntimeError(f"unsupported agent_type: {agent.agent_type}")
-
-    await adapter.start(session.system_prompt_snapshot or "")
-
-    # Rebuild prior context so a session rehydrated after a restart isn't
-    # amnesiac. No-op for a fresh session (no rows) or adapters that don't
-    # override restore_history.
-    history = await db.get_messages(session.id)
-    if history:
-        await adapter.restore_history(history)
-
-    runner = SessionRunner(session.id, adapter, db)
-    await runner.start()
-    registry.register(session.id, runner)
-    return runner
-
-
-def _slugify_folder_name(value: str | None) -> str:
-    if not value:
-        return "source"
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip(".-_")
-    return slug[:48] or "source"
-
-
-def _worktree_root() -> Path:
-    root = Path(get_settings().worktree_root).expanduser().resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _target_dir_for_session(root: Path, source: Path, session_id: str) -> Path:
-    source_name = _slugify_folder_name(source.name)
-    candidate = root / f"{source_name}-{session_id[:8]}"
-    if candidate.exists():
-        raise HTTPException(
-            status_code=409,
-            detail=f"working directory already exists, refusing to overwrite: {candidate}",
-        )
-    return candidate
-
-
-def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-
-
-def _ensure_git_repository(path: Path) -> None:
-    result = _run_git(["rev-parse", "--show-toplevel"], path)
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"selected directory is not inside a Git repository: {path}",
-        )
-
-
-def _create_git_worktree(source_dir: Path, target_dir: Path) -> None:
-    _ensure_git_repository(source_dir)
-    branch = f"augentia/{target_dir.name}"
-    result = _run_git(["worktree", "add", "-b", branch, str(target_dir)], source_dir)
-    if result.returncode != 0:
-        logger.warning(
-            "git worktree add with branch failed cwd=%s target=%s stderr=%s",
-            source_dir, target_dir, result.stderr,
-        )
-        fallback = _run_git(["worktree", "add", str(target_dir)], source_dir)
-        if fallback.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"git worktree creation failed: {fallback.stderr or fallback.stdout}",
-            )
-
-
-async def _get_or_rehydrate(
-    session: Session,
-    db: IAgentDatabase,
-    registry: AdapterRegistry,
-) -> SessionRunner | None:
-    """Return the live runner, rebuilding it from persisted state if the
-    in-memory registry lost it to a backend restart. Returns None when the
-    session can't be rehydrated (claude-code continuity isn't restored yet) so
-    callers fall back to the stub / 409."""
-    try:
-        return registry.get(session.id)
-    except KeyError:
-        pass
-    agent = await db.get_agent(session.agent_id)
-    if agent.agent_type != AgentType.TOOL_USE:
-        return None
-    logger.info("rehydrating runner for session=%s", session.id)
-    try:
-        # Replay the per-session prompt overrides that were stored on the
-        # session row when it was first created, so the rehydrated adapter
-        # sees the same effective system prompt it had pre-restart. Inline
-        # text is restored verbatim; the path is re-read from disk (its
-        # contents may have changed since launch — that's intentional, the
-        # path is the contract, not a snapshot).
-        return await _build_runner(
-            session, agent, db, registry,
-            additional_prompt=session.additional_prompt,
-            additional_prompt_path=session.additional_prompt_path,
-        )
-    except (ValueError, RuntimeError):
-        logger.exception("rehydrate failed session=%s", session.id)
-        await db.update_session_status(session.id, SessionStatus.ERROR)
-        return None
-
-
 @router.post("", response_model=Session, status_code=201)
 async def create_session(
     body: CreateSessionRequest,
@@ -341,16 +118,11 @@ async def create_session(
                 status_code=400,
                 detail="source_dir is required for copy/worktree modes",
             )
-        target = _target_dir_for_session(_worktree_root(), source, session_id)
+        target = target_dir_for_session(worktree_root(), source, session_id)
         if body.create_mode == CreateMode.DUPLICATE_BY_COPY:
-            try:
-                shutil.copytree(source, target)
-            except (OSError, shutil.Error) as e:
-                logger.exception("copytree failed src=%s dst=%s", source, target)
-                raise HTTPException(status_code=500, detail=f"copy failed: {e}")
-            logger.info("copied source directory %s -> %s", source, target)
+            copy_workspace(source, target)
         else:
-            _create_git_worktree(source, target)
+            create_git_worktree(source, target)
             logger.info("created git worktree from %s -> %s", source, target)
         working_dir = str(target.resolve())
     else:
@@ -368,7 +140,7 @@ async def create_session(
     logger.debug("session created id=%s status=%s", session.id, session.status)
 
     try:
-        await _build_runner(
+        await build_runner(
             session, agent, db, registry,
             additional_prompt=body.additional_prompt,
             additional_prompt_path=body.additional_prompt_path,
@@ -436,7 +208,7 @@ async def get_session_system_prompt(
     if session.system_prompt_snapshot:
         return {"system_prompt": session.system_prompt_snapshot, "source": "snapshot"}
     try:
-        prompt = _effective_system_prompt(
+        prompt = effective_system_prompt(
             agent,
             session,
             session.additional_prompt,
@@ -545,7 +317,7 @@ async def post_message(
         session = await db.get_session(session_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    runner = await _get_or_rehydrate(session, db, registry)
+    runner = await get_or_rehydrate(session, db, registry)
     if runner is None:
         raise HTTPException(status_code=409, detail="session has no live adapter")
     logger.info("HTTP submit session=%s len=%d from=%s",
@@ -587,7 +359,7 @@ async def retry_from_message(
     # rebuild it from the now-filtered persisted history before submitting the
     # edited user turn.
     await registry.remove(session_id)
-    runner = await _get_or_rehydrate(session, db, registry)
+    runner = await get_or_rehydrate(session, db, registry)
     if runner is None:
         raise HTTPException(status_code=409, detail="session has no live adapter")
     logger.info("HTTP retry session=%s message=%s len=%d", session_id, message_id, len(content))
@@ -631,7 +403,7 @@ async def session_stream(
 
     await ws.send_text(json.dumps({"type": "session_state", "data": session.model_dump(mode="json")}))
 
-    runner = await _get_or_rehydrate(session, db, registry)
+    runner = await get_or_rehydrate(session, db, registry)
     if runner is None:
         logger.warning("WS session=%s has no live runner (post-restart, stub)", session_id)
         await _stub_loop(ws, session_id, db)

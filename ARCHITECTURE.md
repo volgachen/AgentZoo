@@ -27,6 +27,9 @@ backend/app/
 ├── config.py               # Settings from env / .env
 ├── models/domain.py        # AgentTemplate, Session, Message, Task, Plugin, enums
 ├── core/runner.py          # SessionRunner — owns an adapter, fans out events
+├── core/session_runtime.py # Adapter factory, runner startup, session rehydration
+├── core/session_prompt.py  # Effective prompt and runtime-context construction
+├── core/workspace.py       # Copy and Git-worktree workspace preparation
 ├── db/
 │   ├── interface.py        # IAgentDatabase abstract interface
 │   ├── mysql.py            # MySQL implementation (default)
